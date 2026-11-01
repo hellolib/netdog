@@ -126,6 +126,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let field = NSTextField(labelWithString: text)
         field.font = .systemFont(ofSize: 12)
         field.textColor = .secondaryLabelColor
+        field.lineBreakMode = .byClipping
         return field
     }
 

@@ -2,40 +2,60 @@ import AppKit
 
 enum PopupMetrics {
     static let width: CGFloat = 264
-    static let padding: CGFloat = 8
+    static let margins: CGFloat = 8
+    static let headerHeight: CGFloat = 42
     static let rowHeight: CGFloat = 22
-    static let headerHeight: CGFloat = 30
+    static let sectionHeight: CGFloat = 30
     static let dashboardHeight: CGFloat = 90
     static let chartHeight: CGFloat = 90
+    static let connectivityHeight: CGFloat = 30
     static let radius: CGFloat = 6
+    static let maxProcessRows = Settings.maxProcessCount
 }
 
+/// Content of the network popup. Laid out top-down (flipped) so it can be a
+/// scroll document view; metrics mirror Stats' Net popup.
 final class PopupView: NSView {
+    override var isFlipped: Bool { true }
+
     var onSizeChange: ((NSSize) -> Void)?
     var onRequestLocation: (() -> Void)?
+    var onRefreshPublicIP: (() -> Void)?
+    var onResetTotals: (() -> Void)?
 
     private let chart: NetworkChartView
+    private let connectivityChart = GridChartView()
     private let dashboard = DashboardPanel()
-    private let chartContainer = RoundedPanelView(fill: NSColor.lightGray.withAlphaComponent(0.12), radius: PopupMetrics.radius)
-    private let totalDownRow = TotalRowView(title: "总下载", color: .systemBlue)
+    private let chartContainer = RoundedPanelView(fill: NSColor.lightGray.withAlphaComponent(0.1), radius: PopupMetrics.radius)
+    private let connectivityContainer = RoundedPanelView(fill: NSColor.lightGray.withAlphaComponent(0.1), radius: 3)
+
     private let totalUpRow = TotalRowView(title: "总上传", color: .systemRed)
+    private let totalDownRow = TotalRowView(title: "总下载", color: .systemBlue)
     private let statusRow = BadgeRowView(title: "状态")
-    private let internetRow = BadgeRowView(title: "互联网")
+    private let internetRow = BadgeRowView(title: "互联网连接")
     private let latencyRow = DetailRowView(title: "延迟")
     private let jitterRow = DetailRowView(title: "抖动")
+
     private let interfaceRow = DetailRowView(title: "接口")
+    private let interfaceStatusRow = BadgeRowView(title: "状态")
     private let macRow = DetailRowView(title: "物理地址")
     private let ssidRow = DetailRowView(title: "网络")
     private let standardRow = DetailRowView(title: "标准")
     private let channelRow = DetailRowView(title: "信道")
     private let speedRow = DetailRowView(title: "速率")
-    private let ipv4Row = DetailRowView(title: "本地 IPv4")
-    private let ipv6Row = DetailRowView(title: "本地 IPv6")
-    private let publicV4Row = DetailRowView(title: "公网 IPv4")
-    private let publicV6Row = DetailRowView(title: "公网 IPv6")
+
+    private let localIPRow = DetailRowView(title: "本地 IP")
+    private let publicV4Row = DetailRowView(title: "公网 IP")
+    private let publicV6Row = DetailRowView(title: "公网 IP")
+
     private let locationButton = NSButton(title: "", target: nil, action: nil)
     private let processHeader = SectionHeaderView(title: "进程排行")
-    private let processRows = (0..<ProcessReader.maxCount).map { _ in ProcessRowView() }
+    private let processHeaderRow = ProcessHeaderRowView()
+    private var processRows: [ProcessRowView] = []
+
+    private var items: [NSView] = []
+    private var detailsEnabled = false
+    private var isWiFi = false
 
     var processLimit: Int = Settings.processCount {
         didSet {
@@ -45,19 +65,15 @@ final class PopupView: NSView {
                 row.isHidden = true
                 changed = true
             }
-            if self.processLimit == 0, !self.processHeader.isHidden {
-                self.processHeader.isHidden = true
-                changed = true
+            if self.processLimit == 0 {
+                self.setHidden(true, self.processHeader, &changed)
+                self.setHidden(true, self.processHeaderRow, &changed)
             }
             if changed {
                 self.relayout()
             }
         }
     }
-
-    private var items: [NSView] = []
-    private var wifiRowsHidden: Bool?
-    private var ipv6RowHidden: Bool?
 
     init(chart: NetworkChartView) {
         self.chart = chart
@@ -71,51 +87,75 @@ final class PopupView: NSView {
 
     private func build() {
         self.chartContainer.setFrameSize(NSSize(width: PopupMetrics.width, height: PopupMetrics.chartHeight))
+        self.chart.frame = self.chartContainer.bounds.insetBy(dx: 1, dy: 1)
         self.chartContainer.addSubview(self.chart)
 
-        self.locationButton.target = self
-        self.locationButton.action = #selector(self.requestLocation)
+        self.connectivityContainer.setFrameSize(NSSize(width: PopupMetrics.width, height: PopupMetrics.connectivityHeight))
+        self.connectivityChart.frame = self.connectivityContainer.bounds.insetBy(dx: 1, dy: 1)
+        self.connectivityContainer.addSubview(self.connectivityChart)
+
         self.locationButton.bezelStyle = .rounded
         self.locationButton.controlSize = .small
         self.locationButton.font = .systemFont(ofSize: 10)
+        self.locationButton.target = self
+        self.locationButton.action = #selector(self.requestLocation)
         self.locationButton.isHidden = true
         self.ssidRow.addAccessory(self.locationButton)
 
-        let headers = [
-            SectionHeaderView(title: "使用记录"),
-            SectionHeaderView(title: "流量"),
-            SectionHeaderView(title: "接口信息"),
-            SectionHeaderView(title: "地址")
-        ]
+        let resetButton = Self.symbolButton("arrow.clockwise", tooltip: "重置累计流量")
+        resetButton.target = self
+        resetButton.action = #selector(self.resetTotals)
+        let detailsButton = Self.symbolButton("slider.horizontal.3", tooltip: "显示接口详情")
+        detailsButton.target = self
+        detailsButton.action = #selector(self.toggleDetails)
+        let refreshButton = Self.symbolButton("arrow.clockwise", tooltip: "刷新公网 IP")
+        refreshButton.target = self
+        refreshButton.action = #selector(self.refreshPublicIP)
 
-        self.processHeader.toolTip = "按全接口统计（nettop）"
-        self.processHeader.isHidden = true
-        self.processRows.forEach { row in
-            row.setFrameSize(NSSize(width: PopupMetrics.width, height: PopupMetrics.rowHeight))
-            row.isHidden = true
-        }
-
-        self.latencyRow.setValue("—")
-        self.jitterRow.setValue("—")
+        self.detailsEnabled = Settings.interfaceDetails
+        self.standardRow.isHidden = !self.detailsEnabled
+        self.channelRow.isHidden = !self.detailsEnabled
+        self.speedRow.isHidden = !self.detailsEnabled
         self.publicV4Row.isHidden = true
         self.publicV6Row.isHidden = true
+        self.processHeader.isHidden = true
+        self.processHeaderRow.isHidden = true
+
+        self.processRows = (0..<PopupMetrics.maxProcessRows).map { _ in
+            let row = ProcessRowView(frame: NSRect(x: 0, y: 0, width: PopupMetrics.width, height: PopupMetrics.rowHeight))
+            row.isHidden = true
+            return row
+        }
 
         self.items = [
             self.dashboard,
-            headers[0], self.chartContainer,
-            headers[1], self.totalDownRow, self.totalUpRow, self.statusRow, self.internetRow, self.latencyRow, self.jitterRow,
-            headers[2], self.interfaceRow, self.macRow, self.ssidRow, self.standardRow, self.channelRow, self.speedRow,
-            headers[3], self.ipv4Row, self.ipv6Row, self.publicV4Row, self.publicV6Row,
-            self.processHeader
+            SectionHeaderView(title: "使用记录"),
+            self.chartContainer,
+            SectionHeaderView(title: "连通性记录"),
+            self.connectivityContainer,
+            SectionHeaderView(title: "接口", accessory: resetButton),
+            self.totalUpRow, self.totalDownRow, self.statusRow, self.internetRow, self.latencyRow, self.jitterRow,
+            SectionHeaderView(title: "接口", accessory: detailsButton),
+            self.interfaceRow, self.interfaceStatusRow, self.macRow, self.ssidRow, self.standardRow, self.channelRow, self.speedRow,
+            SectionHeaderView(title: "地址", accessory: refreshButton),
+            self.localIPRow, self.publicV4Row, self.publicV6Row,
+            self.processHeader, self.processHeaderRow
         ] + self.processRows
 
         self.items.forEach { self.addSubview($0) }
         self.relayout()
     }
 
-    override func layout() {
-        super.layout()
-        self.chart.frame = self.chartContainer.bounds.insetBy(dx: 1, dy: 1)
+    private static func symbolButton(_ symbol: String, tooltip: String) -> NSButton {
+        let button = NSButton()
+        button.bezelStyle = .regularSquare
+        button.isBordered = false
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        button.imageScaling = .scaleProportionallyDown
+        button.contentTintColor = .lightGray
+        button.toolTip = tooltip
+        button.frame = NSRect(x: 0, y: 0, width: 20, height: 16)
+        return button
     }
 
     private func relayout() {
@@ -123,14 +163,22 @@ final class PopupView: NSView {
         let height = visible.reduce(CGFloat(0)) { $0 + $1.frame.height }
         self.setFrameSize(NSSize(width: PopupMetrics.width, height: height))
 
-        var y = height
+        var y: CGFloat = 0
         for item in visible {
-            y -= item.frame.height
             item.setFrameOrigin(NSPoint(x: 0, y: y))
+            y += item.frame.height
         }
 
         self.onSizeChange?(self.frame.size)
     }
+
+    private func setHidden(_ hidden: Bool, _ view: NSView, _ changed: inout Bool) {
+        guard view.isHidden != hidden else { return }
+        view.isHidden = hidden
+        changed = true
+    }
+
+    // MARK: - updates
 
     func update(_ usage: NetworkUsage) {
         self.dashboard.update(download: usage.bandwidth.download, upload: usage.bandwidth.upload)
@@ -138,37 +186,68 @@ final class PopupView: NSView {
         self.totalUpRow.setValue(Units.readableMemory(usage.total.upload))
         self.statusRow.set(status: usage.status)
 
+        var changed = false
+
         if let info = usage.interface {
-            self.interfaceRow.setValue("\(info.displayName) (\(info.bsdName))")
-            self.macRow.setValue(info.mac.isEmpty ? "—" : info.mac)
-            self.speedRow.setValue(info.transmitRate > 0 ? "\(Int(info.transmitRate.rounded())) Mbps" : "—")
+            var name = "\(info.displayName) (\(info.bsdName))"
+            if let country = usage.wifi.countryCode, !country.isEmpty {
+                name += ", \(country)"
+            }
+            self.interfaceRow.setValue(name)
+            self.interfaceStatusRow.set(status: info.status)
+            self.macRow.setValue(info.mac.isEmpty ? "未知" : info.mac)
+            self.speedRow.setValue(info.transmitRate > 0 ? "\(Int(info.transmitRate.rounded()))Mbps" : "未知")
         } else {
             self.interfaceRow.setValue("未知")
-            self.macRow.setValue("—")
-            self.speedRow.setValue("—")
+            self.interfaceStatusRow.set(status: false)
+            self.macRow.setValue("未知")
+            self.speedRow.setValue("未知")
         }
 
         let isWiFi = usage.connectionType == .wifi
-        self.applyWiFi(usage)
-        self.applyAddresses(usage)
+        self.isWiFi = isWiFi
+        self.setHidden(!isWiFi, self.ssidRow, &changed)
+        self.setHidden(!(self.detailsEnabled && isWiFi), self.standardRow, &changed)
+        self.setHidden(!(self.detailsEnabled && isWiFi), self.channelRow, &changed)
+        self.setHidden(!self.detailsEnabled, self.speedRow, &changed)
 
-        let wifiChanged = self.wifiRowsHidden != !isWiFi
-        let v6Changed = self.ipv6RowHidden != (usage.laddr.v6 == nil)
-        if wifiChanged || v6Changed {
-            self.wifiRowsHidden = !isWiFi
-            self.ipv6RowHidden = usage.laddr.v6 == nil
+        if isWiFi {
+            let authorized = usage.wifiAuthorization == .authorized
+            self.locationButton.isHidden = authorized
+            self.locationButton.title = usage.wifiAuthorization == .notDetermined ? "允许访问 Wi-Fi 详情" : "打开定位设置"
+            self.ssidRow.setValueHidden(!authorized)
+            if authorized {
+                var text = usage.wifi.ssid ?? "未知"
+                if let rssi = usage.wifi.rssi {
+                    text += " (\(rssi))"
+                }
+                self.ssidRow.setValue(text)
+            }
+            self.standardRow.setValue(usage.wifi.standard ?? "未知")
+            self.channelRow.setValue(usage.wifi.channel ?? "未知")
+            if let rssi = usage.wifi.rssi, let noise = usage.wifi.noise {
+                self.channelRow.toolTip = "RSSI: \(rssi) dBm\nNoise: \(noise) dBm\n频段: \(usage.wifi.channelBand ?? "未知")\n带宽: \(usage.wifi.channelWidth ?? "未知")"
+            } else {
+                self.channelRow.toolTip = nil
+            }
+        }
+
+        self.localIPRow.setValue(usage.laddr.v4 ?? usage.laddr.v6 ?? "未知")
+
+        if changed {
             self.relayout()
         }
     }
 
     func updateConnectivity(_ value: Connectivity) {
         self.internetRow.set(status: value.status)
-        self.latencyRow.setValue(value.status ? "\(Int(value.latency.rounded())) ms" : "—")
-        self.jitterRow.setValue(value.status ? "\(Int(value.jitter.rounded())) ms" : "—")
+        self.latencyRow.setValue(value.status ? "\(Int(value.latency.rounded())) ms" : "")
+        self.jitterRow.setValue(value.status ? "\(Int(value.jitter.rounded())) ms" : "")
+        self.connectivityChart.addValue(value.status)
     }
 
     func updatePublicIP(_ address: PublicAddress?) {
-        var needsRelayout = false
+        var changed = false
 
         if let v4 = address?.v4, !v4.isEmpty {
             var text = v4
@@ -176,10 +255,7 @@ final class PopupView: NSView {
                 text += " (\(country))"
             }
             self.publicV4Row.setValue(text)
-            if self.publicV4Row.isHidden {
-                self.publicV4Row.isHidden = false
-                needsRelayout = true
-            }
+            self.setHidden(false, self.publicV4Row, &changed)
         }
 
         if let v6 = address?.v6, !v6.isEmpty {
@@ -188,13 +264,10 @@ final class PopupView: NSView {
                 text += " (\(country))"
             }
             self.publicV6Row.setValue(text)
-            if self.publicV6Row.isHidden {
-                self.publicV6Row.isHidden = false
-                needsRelayout = true
-            }
+            self.setHidden(false, self.publicV6Row, &changed)
         }
 
-        if needsRelayout {
+        if changed {
             self.relayout()
         }
     }
@@ -202,41 +275,32 @@ final class PopupView: NSView {
     func updateProcesses(_ processes: [ProcessUsage]) {
         let limit = min(processes.count, self.processLimit)
         guard limit > 0 else { return }
-        var needsRelayout = false
+        var changed = false
 
-        if self.processHeader.isHidden {
-            self.processHeader.isHidden = false
-            needsRelayout = true
-        }
+        self.setHidden(false, self.processHeader, &changed)
+        self.setHidden(false, self.processHeaderRow, &changed)
 
         for (index, row) in self.processRows.enumerated() {
             if index < limit {
                 row.update(processes[index])
-                if row.isHidden {
-                    row.isHidden = false
-                    needsRelayout = true
-                }
-            } else if !row.isHidden {
+                self.setHidden(false, row, &changed)
+            } else {
                 row.update(nil)
-                row.isHidden = true
-                needsRelayout = true
+                self.setHidden(true, row, &changed)
             }
         }
 
-        if needsRelayout {
+        if changed {
             self.relayout()
         }
     }
 
     func clearProcesses() {
         var changed = false
-        if !self.processHeader.isHidden {
-            self.processHeader.isHidden = true
-            changed = true
-        }
-        for row in self.processRows where !row.isHidden {
-            row.isHidden = true
-            changed = true
+        self.setHidden(true, self.processHeader, &changed)
+        self.setHidden(true, self.processHeaderRow, &changed)
+        for row in self.processRows {
+            self.setHidden(true, row, &changed)
         }
         if changed {
             self.relayout()
@@ -245,60 +309,37 @@ final class PopupView: NSView {
 
     func clearPublicIP() {
         var changed = false
-        if !self.publicV4Row.isHidden {
-            self.publicV4Row.isHidden = true
-            changed = true
-        }
-        if !self.publicV6Row.isHidden {
-            self.publicV6Row.isHidden = true
-            changed = true
-        }
+        self.setHidden(true, self.publicV4Row, &changed)
+        self.setHidden(true, self.publicV6Row, &changed)
         if changed {
             self.relayout()
         }
     }
 
-    private func applyWiFi(_ usage: NetworkUsage) {
-        let isWiFi = usage.connectionType == .wifi
-        self.ssidRow.isHidden = !isWiFi
-        self.standardRow.isHidden = !isWiFi
-        self.channelRow.isHidden = !isWiFi
-        guard isWiFi else { return }
-
-        let authorized = usage.wifiAuthorization == .authorized
-        self.locationButton.isHidden = authorized
-        self.locationButton.title = usage.wifiAuthorization == .notDetermined ? "允许访问 Wi-Fi 详情" : "打开定位设置"
-        self.ssidRow.setValueHidden(!authorized)
-
-        if authorized {
-            var text = usage.wifi.ssid ?? "未知"
-            if let rssi = usage.wifi.rssi {
-                text += " (\(rssi))"
-            }
-            self.ssidRow.setValue(text)
-        }
-        self.standardRow.setValue(usage.wifi.standard ?? "—")
-        self.channelRow.setValue(usage.wifi.channel ?? "—")
-
-        if let rssi = usage.wifi.rssi, let noise = usage.wifi.noise {
-            self.channelRow.toolTip = "RSSI: \(rssi) dBm\nNoise: \(noise) dBm\n频段: \(usage.wifi.channelBand ?? "—")\n带宽: \(usage.wifi.channelWidth ?? "—")"
-        } else {
-            self.channelRow.toolTip = nil
-        }
-    }
-
-    private func applyAddresses(_ usage: NetworkUsage) {
-        self.ipv4Row.setValue(usage.laddr.v4 ?? "—")
-        if let v6 = usage.laddr.v6, !v6.isEmpty {
-            self.ipv6Row.isHidden = false
-            self.ipv6Row.setValue(v6)
-        } else {
-            self.ipv6Row.isHidden = true
-        }
-    }
+    // MARK: - actions
 
     @objc private func requestLocation() {
         self.onRequestLocation?()
+    }
+
+    @objc private func refreshPublicIP() {
+        self.onRefreshPublicIP?()
+    }
+
+    @objc private func resetTotals() {
+        self.onResetTotals?()
+    }
+
+    @objc private func toggleDetails() {
+        self.detailsEnabled.toggle()
+        Settings.set(self.detailsEnabled, for: Settings.Keys.interfaceDetails)
+        var changed = false
+        self.setHidden(!(self.detailsEnabled && self.isWiFi), self.standardRow, &changed)
+        self.setHidden(!(self.detailsEnabled && self.isWiFi), self.channelRow, &changed)
+        self.setHidden(!self.detailsEnabled, self.speedRow, &changed)
+        if changed {
+            self.relayout()
+        }
     }
 }
 
@@ -343,10 +384,13 @@ private final class MetricView: NSView {
 
         self.valueField.font = .systemFont(ofSize: 26, weight: .light)
         self.valueField.alignment = .right
+        self.valueField.lineBreakMode = .byClipping
         self.unitField.font = .systemFont(ofSize: 13, weight: .light)
         self.unitField.textColor = .labelColor
+        self.unitField.lineBreakMode = .byClipping
         self.titleField.font = .systemFont(ofSize: 11)
         self.titleField.textColor = .secondaryLabelColor
+        self.titleField.lineBreakMode = .byClipping
         self.titleField.stringValue = title
 
         self.addSubview(self.valueField)
@@ -374,15 +418,15 @@ private final class MetricView: NSView {
 
         let valueSize = self.valueField.intrinsicContentSize
         let unitSize = self.unitField.intrinsicContentSize
-        let valueWidth = valueSize.width + 2
-        let unitWidth = unitSize.width + 4
+        let valueWidth = valueSize.width + 6
+        let unitWidth = unitSize.width + 6
         let topWidth = valueWidth + unitWidth
         let topY = (self.bounds.height - topHeight - titleHeight) / 2 + titleHeight
 
         self.valueField.frame = NSRect(x: (self.bounds.width - topWidth) / 2, y: topY, width: valueWidth, height: topHeight)
         self.unitField.frame = NSRect(x: self.valueField.frame.maxX, y: topY + 4, width: unitWidth, height: 15)
 
-        let titleWidth = self.titleField.intrinsicContentSize.width + 6
+        let titleWidth = self.titleField.intrinsicContentSize.width + 8
         let dotSize: CGFloat = 12
         let bottomWidth = titleWidth + dotSize
         let bottomY = topY - titleHeight - 2
@@ -391,27 +435,36 @@ private final class MetricView: NSView {
     }
 }
 
-// MARK: - rows
+// MARK: - section header
 
 private final class SectionHeaderView: NSView {
     private let label = NSTextField(labelWithString: "")
     private let leftLine = NSView()
     private let rightLine = NSView()
+    private let accessory: NSButton?
 
-    init(title: String) {
-        super.init(frame: NSRect(x: 0, y: 0, width: PopupMetrics.width, height: PopupMetrics.headerHeight))
-        self.label.attributedStringValue = NSAttributedString(string: title, attributes: [
+    init(title: String, accessory: NSButton? = nil) {
+        self.accessory = accessory
+        super.init(frame: NSRect(x: 0, y: 0, width: PopupMetrics.width, height: PopupMetrics.sectionHeight))
+
+        self.label.attributedStringValue = NSAttributedString(string: title.uppercased(), attributes: [
             .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.tertiaryLabelColor,
             .kern: 1.0
         ])
+        self.label.lineBreakMode = .byClipping
+        self.label.cell?.usesSingleLineMode = true
         self.leftLine.wantsLayer = true
         self.leftLine.layer?.backgroundColor = NSColor.separatorColor.cgColor
         self.rightLine.wantsLayer = true
         self.rightLine.layer?.backgroundColor = NSColor.separatorColor.cgColor
+
         self.addSubview(self.leftLine)
         self.addSubview(self.label)
         self.addSubview(self.rightLine)
+        if let accessory {
+            self.addSubview(accessory)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -422,12 +475,23 @@ private final class SectionHeaderView: NSView {
         super.layout()
         let size = self.label.intrinsicContentSize
         let gap: CGFloat = 8
-        self.label.frame = NSRect(x: (self.bounds.width - size.width) / 2, y: (self.bounds.height - size.height) / 2, width: size.width, height: size.height)
         let lineY = self.bounds.height / 2
-        self.leftLine.frame = NSRect(x: PopupMetrics.padding, y: lineY, width: max(self.label.frame.minX - gap - PopupMetrics.padding, 0), height: 1)
-        self.rightLine.frame = NSRect(x: self.label.frame.maxX + gap, y: lineY, width: max(self.bounds.width - self.label.frame.maxX - gap - PopupMetrics.padding, 0), height: 1)
+        // NSTextField truncates the last glyph when the frame matches
+        // intrinsicContentSize exactly, so reserve padding.
+        let labelWidth = size.width + 8
+        self.label.frame = NSRect(x: (self.bounds.width - labelWidth) / 2, y: (self.bounds.height - size.height) / 2, width: labelWidth, height: size.height)
+
+        let rightInset: CGFloat = self.accessory != nil ? 24 : 0
+        self.leftLine.frame = NSRect(x: 0, y: lineY, width: max(self.label.frame.minX - gap, 0), height: 1)
+        self.rightLine.frame = NSRect(x: self.label.frame.maxX + gap, y: lineY, width: max(self.bounds.width - rightInset - self.label.frame.maxX - gap, 0), height: 1)
+
+        if let accessory {
+            accessory.frame = NSRect(x: self.bounds.width - 22, y: (self.bounds.height - 16) / 2, width: 20, height: 16)
+        }
     }
 }
+
+// MARK: - rows
 
 private final class DetailRowView: NSView {
     private let label = NSTextField(labelWithString: "")
@@ -439,9 +503,11 @@ private final class DetailRowView: NSView {
 
         self.label.font = .systemFont(ofSize: 12)
         self.label.textColor = .secondaryLabelColor
+        self.label.lineBreakMode = .byClipping
         self.label.stringValue = title
 
-        self.value.font = .systemFont(ofSize: 12)
+        self.value.font = .systemFont(ofSize: 13)
+        self.value.textColor = .textColor
         self.value.alignment = .right
         self.value.lineBreakMode = .byTruncatingMiddle
         self.value.isSelectable = true
@@ -472,11 +538,10 @@ private final class DetailRowView: NSView {
 
     override func layout() {
         super.layout()
-        let labelWidth = self.label.intrinsicContentSize.width + 4
-        self.label.frame = NSRect(x: PopupMetrics.padding, y: (self.bounds.height - 16) / 2, width: labelWidth, height: 16)
+        let labelWidth = self.label.intrinsicContentSize.width + 8
+        self.label.frame = NSRect(x: 0, y: (self.bounds.height - 16) / 2, width: labelWidth, height: 16)
 
-        let containerX = self.label.frame.maxX
-        self.valueContainer.frame = NSRect(x: containerX, y: 0, width: self.bounds.width - containerX - PopupMetrics.padding, height: self.bounds.height)
+        self.valueContainer.frame = NSRect(x: labelWidth, y: 0, width: self.bounds.width - labelWidth, height: self.bounds.height)
         self.value.frame = NSRect(x: 0, y: (self.bounds.height - 16) / 2, width: self.valueContainer.bounds.width, height: 16)
 
         for subview in self.valueContainer.subviews where subview !== self.value {
@@ -497,8 +562,10 @@ private final class TotalRowView: NSView {
 
         self.label.font = .systemFont(ofSize: 12)
         self.label.textColor = .secondaryLabelColor
+        self.label.lineBreakMode = .byClipping
         self.label.stringValue = title
-        self.value.font = .systemFont(ofSize: 12)
+        self.value.font = .systemFont(ofSize: 13)
+        self.value.textColor = .textColor
         self.value.alignment = .right
         self.value.isSelectable = true
         self.value.isBordered = false
@@ -521,10 +588,10 @@ private final class TotalRowView: NSView {
     override func layout() {
         super.layout()
         let dotSize: CGFloat = 10
-        self.dot.frame = NSRect(x: PopupMetrics.padding + 3, y: (self.bounds.height - dotSize) / 2, width: dotSize, height: dotSize)
-        let labelWidth = self.label.intrinsicContentSize.width + 4
-        self.label.frame = NSRect(x: self.dot.frame.maxX + 6, y: (self.bounds.height - 16) / 2, width: labelWidth, height: 16)
-        self.value.frame = NSRect(x: self.label.frame.maxX, y: (self.bounds.height - 16) / 2, width: self.bounds.width - self.label.frame.maxX - PopupMetrics.padding, height: 16)
+        self.dot.frame = NSRect(x: 3, y: (self.bounds.height - dotSize) / 2, width: dotSize, height: dotSize)
+        let labelWidth = min(180, self.label.intrinsicContentSize.width + 8)
+        self.label.frame = NSRect(x: 18, y: (self.bounds.height - 16) / 2, width: labelWidth, height: 16)
+        self.value.frame = NSRect(x: 18 + labelWidth, y: (self.bounds.height - 16) / 2, width: self.bounds.width - labelWidth - 18, height: 16)
     }
 }
 
@@ -537,8 +604,8 @@ private final class BadgeRowView: NSView {
 
         self.label.font = .systemFont(ofSize: 12)
         self.label.textColor = .secondaryLabelColor
+        self.label.lineBreakMode = .byClipping
         self.label.stringValue = title
-        self.badge.isHidden = true
 
         self.addSubview(self.label)
         self.addSubview(self.badge)
@@ -548,41 +615,33 @@ private final class BadgeRowView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    func set(status: Bool) {
-        self.badge.isHidden = false
+    func set(status: Bool?) {
         self.badge.status = status
-        self.needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        let labelWidth = self.label.intrinsicContentSize.width + 4
-        self.label.frame = NSRect(x: PopupMetrics.padding, y: (self.bounds.height - 16) / 2, width: labelWidth, height: 16)
-        let badgeWidth: CGFloat = 44
-        let badgeHeight: CGFloat = 14
-        self.badge.frame = NSRect(
-            x: self.bounds.width - PopupMetrics.padding - badgeWidth,
-            y: (self.bounds.height - badgeHeight) / 2,
-            width: badgeWidth,
-            height: badgeHeight
-        )
+        let labelWidth = self.label.intrinsicContentSize.width + 8
+        self.label.frame = NSRect(x: 0, y: (self.bounds.height - 16) / 2, width: labelWidth, height: 16)
+        self.badge.frame = NSRect(x: self.bounds.width - 50, y: (self.bounds.height - 14) / 2, width: 50, height: 14)
     }
 }
 
 private final class BadgeView: NSView {
-    var status = true {
+    var status: Bool? {
         didSet { self.needsDisplay = true }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let color = self.status ? NSColor.systemGreen : NSColor.systemRed
+        let color = self.status.map { $0 ? NSColor.systemGreen : NSColor.systemRed } ?? NSColor.secondaryLabelColor
         color.setFill()
-        NSBezierPath(roundedRect: self.bounds, xRadius: self.bounds.height / 2, yRadius: self.bounds.height / 2).fill()
+        NSBezierPath(roundedRect: self.bounds, xRadius: 4, yRadius: 4).fill()
 
-        let text = (self.status ? "UP" : "DOWN") as NSString
+        guard let status = self.status else { return }
+        let text = (status ? "UP" : "DOWN") as NSString
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 11, weight: .light),
             .foregroundColor: NSColor.white
         ]
         let size = text.size(withAttributes: attributes)
@@ -593,26 +652,62 @@ private final class BadgeView: NSView {
     }
 }
 
+private final class ProcessHeaderRowView: NSView {
+    private let nameField = NSTextField(labelWithString: "进程")
+    private let downBlock = DotView(size: 12, color: .systemBlue, radius: 4)
+    private let upBlock = DotView(size: 12, color: .systemRed, radius: 4)
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: PopupMetrics.width, height: PopupMetrics.rowHeight))
+        self.nameField.font = .systemFont(ofSize: 11, weight: .medium)
+        self.nameField.textColor = .tertiaryLabelColor
+        self.nameField.lineBreakMode = .byClipping
+        self.downBlock.toolTip = "下载"
+        self.upBlock.toolTip = "上传"
+        self.addSubview(self.nameField)
+        self.addSubview(self.downBlock)
+        self.addSubview(self.upBlock)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func layout() {
+        super.layout()
+        let valueWidth: CGFloat = 68
+        self.nameField.frame = NSRect(x: 22, y: (self.bounds.height - 16) / 2, width: self.bounds.width - 22 - valueWidth * 2, height: 16)
+        self.downBlock.frame = NSRect(x: self.bounds.width - valueWidth * 2 + (valueWidth - 12) / 2, y: (self.bounds.height - 12) / 2, width: 12, height: 12)
+        self.upBlock.frame = NSRect(x: self.bounds.width - valueWidth + (valueWidth - 12) / 2, y: (self.bounds.height - 12) / 2, width: 12, height: 12)
+    }
+}
+
 final class ProcessRowView: NSView {
-    private let nameField = NSTextField(labelWithString: "—")
+    private let iconView = NSImageView()
+    private let nameField = NSTextField(labelWithString: "")
     private let downField = NSTextField(labelWithString: "")
     private let upField = NSTextField(labelWithString: "")
+    private var currentPID: Int?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
-        self.nameField.font = .systemFont(ofSize: 11)
-        self.nameField.lineBreakMode = .byTruncatingMiddle
+        self.iconView.imageScaling = .scaleProportionallyDown
+
+        self.nameField.font = .systemFont(ofSize: 12)
         self.nameField.textColor = .labelColor
+        self.nameField.lineBreakMode = .byTruncatingTail
 
-        self.downField.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        self.downField.textColor = .systemBlue
+        self.downField.font = .systemFont(ofSize: 10)
+        self.downField.textColor = .textColor
         self.downField.alignment = .right
-
-        self.upField.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        self.upField.textColor = .systemRed
+        self.downField.lineBreakMode = .byClipping
+        self.upField.font = .systemFont(ofSize: 10)
+        self.upField.textColor = .textColor
         self.upField.alignment = .right
+        self.upField.lineBreakMode = .byClipping
 
+        self.addSubview(self.iconView)
         self.addSubview(self.nameField)
         self.addSubview(self.downField)
         self.addSubview(self.upField)
@@ -624,28 +719,34 @@ final class ProcessRowView: NSView {
 
     func update(_ process: ProcessUsage?) {
         guard let process else {
+            self.currentPID = nil
+            self.iconView.image = nil
             self.nameField.stringValue = ""
             self.downField.stringValue = ""
             self.upField.stringValue = ""
             self.toolTip = nil
             return
         }
+
         self.nameField.stringValue = process.name
-        self.downField.stringValue = "↓\(Units.readableSpeed(Int64(process.download)))"
-        self.upField.stringValue = "↑\(Units.readableSpeed(Int64(process.upload)))"
+        self.downField.stringValue = Units.readableSpeed(Int64(process.download))
+        self.upField.stringValue = Units.readableSpeed(Int64(process.upload))
+        if self.currentPID != process.pid || self.iconView.image == nil {
+            self.iconView.image = ProcessIconCache.shared.icon(for: process.pid)
+            self.currentPID = process.pid
+        }
         self.toolTip = "\(process.name) (pid \(process.pid))"
     }
 
     override func layout() {
         super.layout()
-        let margin = PopupMetrics.padding
         let valueWidth: CGFloat = 68
-        let nameWidth = self.bounds.width - margin * 2 - valueWidth * 2 - 4
-        let textY = (self.bounds.height - 16) / 2
+        let iconSize: CGFloat = 12
 
-        self.nameField.frame = NSRect(x: margin, y: textY, width: nameWidth, height: 16)
-        self.downField.frame = NSRect(x: margin + nameWidth + 2, y: textY, width: valueWidth, height: 16)
-        self.upField.frame = NSRect(x: margin + nameWidth + 2 + valueWidth, y: textY, width: valueWidth, height: 16)
+        self.iconView.frame = NSRect(x: 2, y: (self.bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
+        self.nameField.frame = NSRect(x: 22, y: (self.bounds.height - 16) / 2, width: self.bounds.width - 22 - valueWidth * 2, height: 16)
+        self.downField.frame = NSRect(x: self.bounds.width - valueWidth * 2, y: (self.bounds.height - 16) / 2, width: valueWidth, height: 16)
+        self.upField.frame = NSRect(x: self.bounds.width - valueWidth, y: (self.bounds.height - 16) / 2, width: valueWidth, height: 16)
     }
 }
 

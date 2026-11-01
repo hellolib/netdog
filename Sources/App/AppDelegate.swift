@@ -5,12 +5,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let speedView = SpeedStatusView(frame: NSRect(x: 0, y: 0, width: 58, height: 22))
     private let chart = NetworkChartView(num: 180)
     private let menu = NSMenu()
-    private let popover = NSPopover()
 
     private lazy var popupView = PopupView(chart: self.chart)
-    private lazy var popupController: NSViewController = {
-        let controller = NSViewController()
-        controller.view = self.popupView
+    private lazy var popupWindow: PopupWindowController = {
+        let controller = PopupWindowController(content: self.popupView)
+        controller.onOpenSettings = { [weak self] in self?.showSettings() }
+        controller.onOpenActivityMonitor = { [weak self] in self?.openActivityMonitor() }
         return controller
     }()
     private lazy var settingsWindow: SettingsWindowController = {
@@ -32,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.configureStatusItem()
         self.configureMenu()
-        self.configurePopover()
+        self.configurePopup()
         self.configureReader()
         self.observeSleepWake()
     }
@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if NSApp.currentEvent?.type == .rightMouseUp {
             self.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
         } else {
-            self.togglePopover()
+            self.togglePopup()
         }
     }
 
@@ -108,37 +108,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - popover
+    // MARK: - popup
 
-    private func configurePopover() {
-        self.popover.contentViewController = self.popupController
-        self.popover.behavior = .transient
-        self.popover.animates = false
-
-        let size = self.popupView.frame.size
-        self.popupController.preferredContentSize = size
-        self.popover.contentSize = size
-
-        self.popupView.onSizeChange = { [weak self] newSize in
-            guard let self else { return }
-            self.popupController.preferredContentSize = newSize
-            self.popover.contentSize = newSize
+    private func configurePopup() {
+        self.popupView.onSizeChange = { [weak self] _ in
+            self?.popupWindow.resizeToFit()
         }
         self.popupView.onRequestLocation = {
             LocationAuth.shared.request()
         }
+        self.popupView.onRefreshPublicIP = { [weak self] in
+            self?.refreshPublicIP()
+        }
+        self.popupView.onResetTotals = { [weak self] in
+            self?.reader?.resetTotal()
+        }
     }
 
-    private func togglePopover() {
+    private func togglePopup() {
         guard let button = self.statusItem.button else { return }
-        if self.popover.isShown {
-            self.popover.performClose(nil)
-            return
-        }
         if let usage = self.lastUsage {
             self.popupView.update(usage)
         }
-        self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        self.popupWindow.toggle(at: button)
+    }
+
+    private func openActivityMonitor() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor") else { return }
+        UserDefaults(suiteName: "com.apple.ActivityMonitor")?.set(4, forKey: "SelectedTab")
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     // MARK: - reader
@@ -200,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func willSleep() {
+        self.popupWindow.hide()
         self.reader?.stop()
         self.processReader?.stop()
         self.connectivityReader?.stop()

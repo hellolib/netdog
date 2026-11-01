@@ -15,6 +15,7 @@ enum Settings {
         static let icmpHost = "Network_ICMPHost"
         static let httpHost = "Network_HTTPHost"
         static let publicIP = "Network_publicIP"
+        static let interfaceDetails = "Network_interfaceDetails"
     }
 
     static func registerDefaults() {
@@ -24,8 +25,13 @@ enum Settings {
             Keys.connectivityMode: defaultConnectivityMode,
             Keys.icmpHost: defaultICMPHost,
             Keys.httpHost: defaultHTTPHost,
-            Keys.publicIP: true
+            Keys.publicIP: true,
+            Keys.interfaceDetails: false
         ])
+    }
+
+    static var interfaceDetails: Bool {
+        return UserDefaults.standard.bool(forKey: Keys.interfaceDetails)
     }
 
     static var updateInterval: Double {

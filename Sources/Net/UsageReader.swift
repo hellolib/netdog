@@ -35,6 +35,12 @@ final class UsageReader: Reader<NetworkUsage> {
         }
     }
 
+    func resetTotal() {
+        self.onQueue { [weak self] in
+            self?.total = Bandwidth()
+        }
+    }
+
     override func read() {
         let name = InterfaceResolver.primary()
         if name != self.lastInterface {

@@ -52,6 +52,20 @@ enum DebugRenderer {
         popup.appearance = NSAppearance(named: .aqua)
         render(view: popup, to: directory + "/popup.png", background: .windowBackgroundColor)
 
+        let container = PopupContainerView(content: popup)
+        container.appearance = NSAppearance(named: .aqua)
+        let windowSize = container.updateLayout(contentSize: popup.frame.size, visibleHeight: 2000)
+        container.frame = NSRect(origin: .zero, size: windowSize)
+        render(view: container, to: directory + "/popup-window.png", background: NSColor(calibratedWhite: 0.72, alpha: 1))
+
+        // Scrollable variant (small screen): verifies the 20pt scroller reservation.
+        let short = PopupContainerView(content: PopupView(chart: NetworkChartView(num: 180)))
+        short.appearance = NSAppearance(named: .aqua)
+        let shortSize = short.updateLayout(contentSize: popup.frame.size, visibleHeight: 600)
+        short.frame = NSRect(origin: .zero, size: shortSize)
+        render(view: short, to: directory + "/popup-scroll.png", background: NSColor(calibratedWhite: 0.72, alpha: 1))
+        print("panel height capped to \(Int(shortSize.height)) with scroller")
+
         let bar = SpeedStatusView(frame: NSRect(x: 0, y: 0, width: 58, height: 22))
         bar.appearance = NSAppearance(named: .aqua)
         bar.update(download: 1_240_000, upload: 320_000)
