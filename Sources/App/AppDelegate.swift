@@ -3,8 +3,9 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: 58)
     private let speedView = SpeedStatusView(frame: NSRect(x: 0, y: 0, width: 58, height: 22))
-    private let chart = NetworkChartView(num: 180)
+    private let chart = NetworkChartView()
     private let menu = NSMenu()
+    private var publicIPTimer: Timer?
 
     private lazy var popupView = PopupView(chart: self.chart)
     private lazy var popupWindow: PopupWindowController = {
@@ -38,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        self.reader?.persistNow()
         self.reader?.stop()
         self.processReader?.stop()
         self.connectivityReader?.stop()
@@ -47,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureStatusItem() {
         guard let button = self.statusItem.button else { return }
+        self.statusItem.length = self.speedView.preferredWidth
         self.speedView.frame = button.bounds
         self.speedView.autoresizingMask = [.width, .height]
         button.title = ""
@@ -91,7 +94,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings() {
+        self.statusItem.length = self.speedView.preferredWidth
+        self.speedView.configure()
+        self.chart.reconfigure()
+
         self.reader?.setInterval(Settings.updateInterval)
+        self.connectivityReader?.setInterval(TimeInterval(Settings.connectivityInterval))
         self.connectivityReader?.reconfigure(
             icmpHost: Settings.icmpHost,
             httpURL: Settings.httpURL,
@@ -106,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             self.popupView.clearPublicIP()
         }
+        self.schedulePublicIPRefresh()
     }
 
     // MARK: - popup
@@ -147,7 +156,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.lastUsage = usage
                 self.chart.addValue(upload: Double(usage.bandwidth.upload), download: Double(usage.bandwidth.download))
-                self.speedView.update(download: usage.bandwidth.download, upload: usage.bandwidth.upload)
+
+                var menuDownload = usage.bandwidth.download
+                var menuUpload = usage.bandwidth.upload
+                if Settings.thresholdEnabled {
+                    let threshold = Settings.thresholdBytes
+                    if menuDownload < threshold, menuUpload < threshold {
+                        menuDownload = 0
+                        menuUpload = 0
+                    }
+                }
+                self.speedView.update(download: menuDownload, upload: menuUpload)
                 self.popupView.update(usage)
                 self.statusItem.button?.toolTip = self.toolTip(for: usage)
             }
@@ -176,6 +195,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.refreshPublicIP()
             }
         }
+        self.schedulePublicIPRefresh()
+    }
+
+    private func schedulePublicIPRefresh() {
+        self.publicIPTimer?.invalidate()
+        self.publicIPTimer = nil
+        guard Settings.publicIPEnabled, let interval = Settings.publicIPRefreshSeconds else { return }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.refreshPublicIP()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.publicIPTimer = timer
     }
 
     @objc private func refreshPublicIP() {
@@ -199,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func willSleep() {
         self.popupWindow.hide()
+        self.reader?.persistNow()
         self.reader?.stop()
         self.processReader?.stop()
         self.connectivityReader?.stop()

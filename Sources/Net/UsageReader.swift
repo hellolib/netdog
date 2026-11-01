@@ -5,6 +5,7 @@ import SystemConfiguration
 
 final class UsageReader: Reader<NetworkUsage> {
     private static let detailsInterval: TimeInterval = 15
+    private static let persistInterval: TimeInterval = 10
 
     private var lastCounters: Bandwidth?
     private var lastSample: DispatchTime?
@@ -15,6 +16,8 @@ final class UsageReader: Reader<NetworkUsage> {
     private var cachedType: ConnectionType?
     private var cachedAddresses = LocalAddresses()
     private var cachedWiFi = WiFiDetails()
+    private var lastPersist = Date.distantPast
+    private var lastPolicy = Settings.usageReset
 
     private let authorization: () -> WiFiAuthorization
 
@@ -25,6 +28,16 @@ final class UsageReader: Reader<NetworkUsage> {
     ) {
         self.authorization = authorization
         super.init(label: "netdog.usage", interval: interval, handler: handler)
+
+        self.total = Bandwidth(
+            upload: Int64(Settings.int(Settings.Keys.totalUpload)),
+            download: Int64(Settings.int(Settings.Keys.totalDownload))
+        )
+        if Settings.usageReset == .atStart {
+            self.total = Bandwidth()
+            self.persistTotals(force: true)
+        }
+        self.refreshResetSchedule()
     }
 
     /// Forces the next tick to re-read interface/Wi-Fi details (e.g. after
@@ -37,11 +50,22 @@ final class UsageReader: Reader<NetworkUsage> {
 
     func resetTotal() {
         self.onQueue { [weak self] in
-            self?.total = Bandwidth()
+            guard let self else { return }
+            self.total = Bandwidth()
+            self.persistTotals(force: true)
+        }
+    }
+
+    /// Flushes accumulated totals before quitting or sleeping.
+    func persistNow() {
+        self.onQueue { [weak self] in
+            self?.persistTotals(force: true)
         }
     }
 
     override func read() {
+        self.checkUsageReset()
+
         let name = InterfaceResolver.primary()
         if name != self.lastInterface {
             self.lastInterface = name
@@ -50,7 +74,14 @@ final class UsageReader: Reader<NetworkUsage> {
         }
 
         let now = DispatchTime.now()
-        guard let counters = InterfaceCounters.bytes(for: name) else {
+        let counters: Bandwidth?
+        if Settings.readerType == "process" {
+            counters = ProcessReader.totalBytes()
+        } else {
+            counters = InterfaceCounters.bytes(for: name)
+        }
+
+        guard let counters else {
             self.reset()
             var value = NetworkUsage()
             value.interface = self.cachedInfo
@@ -75,6 +106,11 @@ final class UsageReader: Reader<NetworkUsage> {
             if download > maxDelta { download = 0 }
             if upload > maxDelta { upload = 0 }
 
+            if Settings.vpnMode, VPN.isActive() {
+                download /= 2
+                upload /= 2
+            }
+
             value.bandwidth = Bandwidth(upload: upload, download: download)
         }
 
@@ -84,6 +120,7 @@ final class UsageReader: Reader<NetworkUsage> {
 
         self.lastCounters = counters
         self.lastSample = now
+        self.persistTotals()
 
         self.refreshDetailsIfNeeded(interface: name)
 
@@ -101,12 +138,65 @@ final class UsageReader: Reader<NetworkUsage> {
         self.lastSample = nil
     }
 
+    // MARK: - usage reset
+
+    private func checkUsageReset() {
+        let policy = Settings.usageReset
+        if policy != self.lastPolicy {
+            self.lastPolicy = policy
+            self.total = Bandwidth()
+            self.refreshResetSchedule()
+            self.persistTotals(force: true)
+            return
+        }
+
+        guard policy == .daily || policy == .weekly || policy == .monthly else { return }
+        let next = Settings.double(Settings.Keys.usageResetNext)
+        if next > 0, Date().timeIntervalSince1970 >= next {
+            self.total = Bandwidth()
+            self.refreshResetSchedule()
+            self.persistTotals(force: true)
+        }
+    }
+
+    private func refreshResetSchedule() {
+        let calendar = Calendar.current
+        let now = Date()
+        var next: Date?
+
+        switch Settings.usageReset {
+        case .daily:
+            next = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
+        case .weekly:
+            let start = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+            next = calendar.date(byAdding: .weekOfYear, value: 1, to: start)
+        case .monthly:
+            let start = calendar.dateInterval(of: .month, for: now)?.start ?? now
+            next = calendar.date(byAdding: .month, value: 1, to: start)
+        default:
+            next = nil
+        }
+
+        Settings.set(next.map { Int($0.timeIntervalSince1970) } ?? 0, for: Settings.Keys.usageResetNext)
+        Settings.set(Int(now.timeIntervalSince1970), for: Settings.Keys.usageResetTS)
+    }
+
+    private func persistTotals(force: Bool = false) {
+        let now = Date()
+        guard force || now.timeIntervalSince(self.lastPersist) >= Self.persistInterval else { return }
+        self.lastPersist = now
+        Settings.set(Int(self.total.upload), for: Settings.Keys.totalUpload)
+        Settings.set(Int(self.total.download), for: Settings.Keys.totalDownload)
+    }
+
+    // MARK: - details
+
     private func refreshDetailsIfNeeded(interface: String) {
         guard !interface.isEmpty, Date().timeIntervalSince(self.lastDetailsTS) >= Self.detailsInterval else { return }
         self.lastDetailsTS = Date()
 
         let authorized = self.authorization() == .authorized
-        let details = Self.snapshot(interface: interface, authorized: authorized)
+        let details = Self.readDetails(interface: interface, authorized: authorized)
         self.cachedInfo = details.info
         self.cachedType = details.type
         self.cachedAddresses = details.addresses
@@ -114,6 +204,13 @@ final class UsageReader: Reader<NetworkUsage> {
     }
 
     static func snapshot(
+        interface: String,
+        authorized: Bool
+    ) -> (info: InterfaceInfo?, type: ConnectionType?, addresses: LocalAddresses, wifi: WiFiDetails) {
+        return self.readDetails(interface: interface, authorized: authorized)
+    }
+
+    private static func readDetails(
         interface: String,
         authorized: Bool
     ) -> (info: InterfaceInfo?, type: ConnectionType?, addresses: LocalAddresses, wifi: WiFiDetails) {

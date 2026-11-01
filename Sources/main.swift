@@ -27,6 +27,14 @@ if arguments.contains("--ip") {
     CLISampler.publicIP()
     exit(0)
 }
+if arguments.contains("--usage") {
+    CLISampler.usage(seconds: 3)
+    exit(0)
+}
+if let index = arguments.firstIndex(of: "--format"), index + 1 < arguments.count, let bytes = Int64(arguments[index + 1]) {
+    CLISampler.format(bytes)
+    exit(0)
+}
 if let index = arguments.firstIndex(of: "--render") {
     let directory = index + 1 < arguments.count ? arguments[index + 1] : "/tmp/netdog-render"
     DebugRenderer.render(to: directory)

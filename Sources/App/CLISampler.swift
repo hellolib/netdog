@@ -102,6 +102,35 @@ enum CLISampler {
         print("ipv4=\(result.v4 ?? "-") ipv6=\(result.v6 ?? "-") country=\(result.country ?? "-")")
     }
 
+    /// Runs the real UsageReader pipeline (reader type, interface override,
+    /// VPN mode, totals persistence) and prints three samples.
+    static func usage(seconds: Double) {
+        let lock = NSLock()
+        var samples = 0
+        let reader = UsageReader(interval: 1, authorization: { LocationAuth.shared.status }) { value in
+            lock.lock()
+            samples += 1
+            let count = samples
+            lock.unlock()
+
+            let iface = value.interface.map { "\($0.bsdName)(\($0.displayName))" } ?? "-"
+            let type = value.connectionType?.rawValue ?? "-"
+            print("sample=\(count) iface=\(iface) type=\(type) down=\(value.bandwidth.download) up=\(value.bandwidth.upload) totalDown=\(value.total.download) totalUp=\(value.total.upload)")
+            if count >= 3 {
+                exit(0)
+            }
+        }
+        reader.start()
+        Thread.sleep(forTimeInterval: 15)
+        write("no sample")
+        exit(1)
+    }
+
+    static func format(_ bytes: Int64) {
+        let (value, unit) = Units.readableTuple(bytes)
+        print("bytes=\(bytes) value=\(value) unit=\(unit) speed=\(Units.readableSpeed(bytes))")
+    }
+
     static func run(seconds: Double) {
         let interface = InterfaceResolver.primary()
         guard !interface.isEmpty else {

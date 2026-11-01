@@ -1,3 +1,4 @@
+import CFNetwork
 import Darwin
 import Foundation
 import SystemConfiguration
@@ -8,6 +9,11 @@ enum InterfaceResolver {
     static let virtualPrefixes = ["utun", "ipsec", "ppp", "tun", "tap", "gif", "stf", "wg"]
 
     static func primary() -> String {
+        let preferred = Settings.interfaceName
+        if !preferred.isEmpty, if_nametoindex(preferred) != 0 {
+            return preferred
+        }
+
         if let global = SCDynamicStoreCopyValue(nil, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
            let name = global["PrimaryInterface"] as? String, !name.isEmpty {
             if isVirtual(name), let physical = self.physical() {
@@ -61,8 +67,7 @@ enum InterfaceResolver {
 
 /// Raw byte counters for one interface, read from the routing table
 /// (same NET_RT_IFLIST2 source Stats uses).
-enum InterfaceCounters {
-    static func bytes(for name: String) -> Bandwidth? {
+enum InterfaceCounters {    static func bytes(for name: String) -> Bandwidth? {
         let index = if_nametoindex(name)
         guard index != 0 else { return nil }
 
@@ -98,5 +103,18 @@ enum InterfaceCounters {
         }
 
         return nil
+    }
+}
+
+/// Same detection Stats uses for its VPN mode (scoped proxy settings).
+enum VPN {
+    static func isActive() -> Bool {
+        guard let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any],
+              let scopes = settings["__SCOPED__"] as? [String: Any] else {
+            return false
+        }
+        return scopes.keys.contains { key in
+            ["tap", "tun", "ppp", "ipsec"].contains { key.contains($0) }
+        }
     }
 }

@@ -252,7 +252,11 @@ final class PopupView: NSView {
         if let v4 = address?.v4, !v4.isEmpty {
             var text = v4
             if let country = address?.country, !country.isEmpty {
-                text += " (\(country))"
+                if Settings.emojiCC, let flag = countryFlag(country) {
+                    text += " \(flag)"
+                } else {
+                    text += " (\(country))"
+                }
             }
             self.publicV4Row.setValue(text)
             self.setHidden(false, self.publicV4Row, &changed)
@@ -261,7 +265,11 @@ final class PopupView: NSView {
         if let v6 = address?.v6, !v6.isEmpty {
             var text = v6
             if let country = address?.country, !country.isEmpty {
-                text += " (\(country))"
+                if Settings.emojiCC, let flag = countryFlag(country) {
+                    text += " \(flag)"
+                } else {
+                    text += " (\(country))"
+                }
             }
             self.publicV6Row.setValue(text)
             self.setHidden(false, self.publicV6Row, &changed)

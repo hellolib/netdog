@@ -57,3 +57,15 @@ enum PublicIP {
         }
     }
 }
+
+/// Regional-indicator flag for a two-letter country code (Stats' countryFlag).
+func countryFlag(_ code: String) -> String? {
+    let upper = code.uppercased()
+    guard upper.count == 2, upper.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+    var scalars = String.UnicodeScalarView()
+    for scalar in upper.unicodeScalars {
+        guard let flag = UnicodeScalar(127397 + scalar.value) else { return nil }
+        scalars.append(flag)
+    }
+    return String(scalars)
+}

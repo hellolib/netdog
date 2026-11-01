@@ -76,6 +76,25 @@ final class ProcessReader: Reader<[ProcessUsage]> {
         return Array(list.sorted { max($0.download, $0.upload) > max($1.download, $1.upload) }.prefix(self.maxCount))
     }
 
+    /// System-wide cumulative bytes across all processes, used when the
+    /// bandwidth reader type is "processes based" (Stats' readProcessBandwidth).
+    static func totalBytes() -> Bandwidth? {
+        guard let output = self.nettopOutput() else { return nil }
+        var total = Bandwidth()
+        var firstLine = true
+        output.enumerateLines { line, _ in
+            if firstLine {
+                firstLine = false
+                return
+            }
+            let fields = line.split(separator: ",")
+            guard fields.count >= 3 else { return }
+            total.download += Int64(Int(fields[1]) ?? 0)
+            total.upload += Int64(Int(fields[2]) ?? 0)
+        }
+        return total
+    }
+
     private static func nettopOutput() -> String? {
         return Shell.run(
             path: "/usr/bin/nettop",

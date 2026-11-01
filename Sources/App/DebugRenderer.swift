@@ -68,6 +68,8 @@ enum DebugRenderer {
 
         let bar = SpeedStatusView(frame: NSRect(x: 0, y: 0, width: 58, height: 22))
         bar.appearance = NSAppearance(named: .aqua)
+        bar.configure()
+        bar.setFrameSize(NSSize(width: bar.preferredWidth, height: 22))
         bar.update(download: 1_240_000, upload: 320_000)
         render(view: bar, to: directory + "/menubar.png", background: NSColor(calibratedWhite: 0.95, alpha: 1))
 
