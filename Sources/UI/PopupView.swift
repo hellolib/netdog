@@ -57,17 +57,20 @@ final class PopupView: NSView {
     private var detailsEnabled = false
     private var isWiFi = false
 
+    private var enabledSections: Set<PopupSection> = Set(PopupSection.allCases)
+    private var sectionViews: [(view: NSView, section: PopupSection)] = []
+    private var desiredVisible: [ObjectIdentifier: Bool] = [:]
+
     var processLimit: Int = Settings.processCount {
         didSet {
             guard self.processLimit != oldValue else { return }
             var changed = false
-            for (index, row) in self.processRows.enumerated() where index >= self.processLimit && !row.isHidden {
-                row.isHidden = true
-                changed = true
+            for (index, row) in self.processRows.enumerated() where index >= self.processLimit {
+                self.setVisible(row, false, &changed)
             }
             if self.processLimit == 0 {
-                self.setHidden(true, self.processHeader, &changed)
-                self.setHidden(true, self.processHeaderRow, &changed)
+                self.setVisible(self.processHeader, false, &changed)
+                self.setVisible(self.processHeaderRow, false, &changed)
             }
             if changed {
                 self.relayout()
@@ -96,10 +99,11 @@ final class PopupView: NSView {
 
         self.locationButton.bezelStyle = .rounded
         self.locationButton.controlSize = .small
-        self.locationButton.font = .systemFont(ofSize: 10)
+        self.locationButton.font = .systemFont(ofSize: 11)
         self.locationButton.target = self
         self.locationButton.action = #selector(self.requestLocation)
         self.locationButton.isHidden = true
+        self.locationButton.sizeToFit()
         self.ssidRow.addAccessory(self.locationButton)
 
         let resetButton = Self.symbolButton("arrow.clockwise", tooltip: "重置累计流量")
@@ -127,27 +131,84 @@ final class PopupView: NSView {
             return row
         }
 
+        let usageHeader = SectionHeaderView(title: "负载历史")
+        let connectivityHeader = SectionHeaderView(title: "连接历史")
+        let trafficHeader = SectionHeaderView(title: "接口", accessory: resetButton)
+        let interfaceHeader = SectionHeaderView(title: "接口", accessory: detailsButton)
+        let addressHeader = SectionHeaderView(title: "地址", accessory: refreshButton)
+
         self.items = [
             self.dashboard,
-            SectionHeaderView(title: "使用记录"),
-            self.chartContainer,
-            SectionHeaderView(title: "连通性记录"),
-            self.connectivityContainer,
-            SectionHeaderView(title: "接口", accessory: resetButton),
+            usageHeader, self.chartContainer,
+            connectivityHeader, self.connectivityContainer,
+            trafficHeader,
             self.totalUpRow, self.totalDownRow, self.statusRow, self.internetRow, self.latencyRow, self.jitterRow,
-            SectionHeaderView(title: "接口", accessory: detailsButton),
+            interfaceHeader,
             self.interfaceRow, self.interfaceStatusRow, self.macRow, self.ssidRow, self.standardRow, self.channelRow, self.speedRow,
-            SectionHeaderView(title: "地址", accessory: refreshButton),
+            addressHeader,
             self.localIPRow, self.publicV4Row, self.publicV6Row,
             self.processHeader, self.processHeaderRow
         ] + self.processRows
 
+        self.registerSection(.usageHistory, [usageHeader, self.chartContainer])
+        self.registerSection(.connectivityHistory, [connectivityHeader, self.connectivityContainer])
+        self.registerSection(.traffic, [
+            trafficHeader, self.totalUpRow, self.totalDownRow, self.statusRow,
+            self.internetRow, self.latencyRow, self.jitterRow
+        ])
+        self.registerSection(.interfaceInfo, [
+            interfaceHeader, self.interfaceRow, self.interfaceStatusRow, self.macRow,
+            self.ssidRow, self.standardRow, self.channelRow, self.speedRow
+        ])
+        self.registerSection(.address, [addressHeader, self.localIPRow, self.publicV4Row, self.publicV6Row])
+        self.registerSection(.processes, [self.processHeader, self.processHeaderRow] + self.processRows)
+
         self.items.forEach { self.addSubview($0) }
+
+        self.enabledSections = Set(Settings.popupSections)
+        self.snapshotDesired()
+        _ = self.applySectionVisibility()
         self.relayout()
+    }
+
+    private func registerSection(_ section: PopupSection, _ views: [NSView]) {
+        views.forEach { self.sectionViews.append((view: $0, section: section)) }
+    }
+
+    private func section(for view: NSView) -> PopupSection? {
+        return self.sectionViews.first { $0.view === view }?.section
+    }
+
+    private func snapshotDesired() {
+        for entry in self.sectionViews {
+            self.desiredVisible[ObjectIdentifier(entry.view)] = !entry.view.isHidden
+        }
+    }
+
+    /// Re-applies the section toggles on top of the current dynamic visibility.
+    func applySettings() {
+        self.enabledSections = Set(Settings.popupSections)
+        if self.applySectionVisibility() {
+            self.relayout()
+        }
+    }
+
+    private func applySectionVisibility() -> Bool {
+        var changed = false
+        for entry in self.sectionViews {
+            let visible = self.desiredVisible[ObjectIdentifier(entry.view)] ?? true
+            let hidden = !(visible && self.enabledSections.contains(entry.section))
+            if entry.view.isHidden != hidden {
+                entry.view.isHidden = hidden
+                changed = true
+            }
+        }
+        return changed
     }
 
     private static func symbolButton(_ symbol: String, tooltip: String) -> NSButton {
         let button = NSButton()
+        button.title = ""
         button.bezelStyle = .regularSquare
         button.isBordered = false
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
@@ -172,7 +233,10 @@ final class PopupView: NSView {
         self.onSizeChange?(self.frame.size)
     }
 
-    private func setHidden(_ hidden: Bool, _ view: NSView, _ changed: inout Bool) {
+    private func setVisible(_ view: NSView, _ visible: Bool, _ changed: inout Bool) {
+        self.desiredVisible[ObjectIdentifier(view)] = visible
+        let sectionEnabled = self.section(for: view).map { self.enabledSections.contains($0) } ?? true
+        let hidden = !(visible && sectionEnabled)
         guard view.isHidden != hidden else { return }
         view.isHidden = hidden
         changed = true
@@ -206,15 +270,17 @@ final class PopupView: NSView {
 
         let isWiFi = usage.connectionType == .wifi
         self.isWiFi = isWiFi
-        self.setHidden(!isWiFi, self.ssidRow, &changed)
-        self.setHidden(!(self.detailsEnabled && isWiFi), self.standardRow, &changed)
-        self.setHidden(!(self.detailsEnabled && isWiFi), self.channelRow, &changed)
-        self.setHidden(!self.detailsEnabled, self.speedRow, &changed)
+        self.setVisible(self.ssidRow, isWiFi, &changed)
+        self.setVisible(self.standardRow, self.detailsEnabled && isWiFi, &changed)
+        self.setVisible(self.channelRow, self.detailsEnabled && isWiFi, &changed)
+        self.setVisible(self.speedRow, self.detailsEnabled, &changed)
 
         if isWiFi {
             let authorized = usage.wifiAuthorization == .authorized
             self.locationButton.isHidden = authorized
             self.locationButton.title = usage.wifiAuthorization == .notDetermined ? "允许访问 Wi-Fi 详情" : "打开定位设置"
+            self.locationButton.sizeToFit()
+            self.ssidRow.needsLayout = true
             self.ssidRow.setValueHidden(!authorized)
             if authorized {
                 var text = usage.wifi.ssid ?? "未知"
@@ -259,7 +325,7 @@ final class PopupView: NSView {
                 }
             }
             self.publicV4Row.setValue(text)
-            self.setHidden(false, self.publicV4Row, &changed)
+            self.setVisible(self.publicV4Row, true, &changed)
         }
 
         if let v6 = address?.v6, !v6.isEmpty {
@@ -272,7 +338,7 @@ final class PopupView: NSView {
                 }
             }
             self.publicV6Row.setValue(text)
-            self.setHidden(false, self.publicV6Row, &changed)
+            self.setVisible(self.publicV6Row, true, &changed)
         }
 
         if changed {
@@ -285,16 +351,16 @@ final class PopupView: NSView {
         guard limit > 0 else { return }
         var changed = false
 
-        self.setHidden(false, self.processHeader, &changed)
-        self.setHidden(false, self.processHeaderRow, &changed)
+        self.setVisible(self.processHeader, true, &changed)
+        self.setVisible(self.processHeaderRow, true, &changed)
 
         for (index, row) in self.processRows.enumerated() {
             if index < limit {
                 row.update(processes[index])
-                self.setHidden(false, row, &changed)
+                self.setVisible(row, true, &changed)
             } else {
                 row.update(nil)
-                self.setHidden(true, row, &changed)
+                self.setVisible(row, false, &changed)
             }
         }
 
@@ -305,10 +371,10 @@ final class PopupView: NSView {
 
     func clearProcesses() {
         var changed = false
-        self.setHidden(true, self.processHeader, &changed)
-        self.setHidden(true, self.processHeaderRow, &changed)
+        self.setVisible(self.processHeader, false, &changed)
+        self.setVisible(self.processHeaderRow, false, &changed)
         for row in self.processRows {
-            self.setHidden(true, row, &changed)
+            self.setVisible(row, false, &changed)
         }
         if changed {
             self.relayout()
@@ -317,8 +383,8 @@ final class PopupView: NSView {
 
     func clearPublicIP() {
         var changed = false
-        self.setHidden(true, self.publicV4Row, &changed)
-        self.setHidden(true, self.publicV6Row, &changed)
+        self.setVisible(self.publicV4Row, false, &changed)
+        self.setVisible(self.publicV6Row, false, &changed)
         if changed {
             self.relayout()
         }
@@ -342,9 +408,9 @@ final class PopupView: NSView {
         self.detailsEnabled.toggle()
         Settings.set(self.detailsEnabled, for: Settings.Keys.interfaceDetails)
         var changed = false
-        self.setHidden(!(self.detailsEnabled && self.isWiFi), self.standardRow, &changed)
-        self.setHidden(!(self.detailsEnabled && self.isWiFi), self.channelRow, &changed)
-        self.setHidden(!self.detailsEnabled, self.speedRow, &changed)
+        self.setVisible(self.standardRow, self.detailsEnabled && self.isWiFi, &changed)
+        self.setVisible(self.channelRow, self.detailsEnabled && self.isWiFi, &changed)
+        self.setVisible(self.speedRow, self.detailsEnabled, &changed)
         if changed {
             self.relayout()
         }
@@ -483,11 +549,19 @@ private final class SectionHeaderView: NSView {
         super.layout()
         let size = self.label.intrinsicContentSize
         let gap: CGFloat = 8
-        let lineY = self.bounds.height / 2
+        // NSTextField draws its glyphs about 3pt below the frame center at
+        // this font size; compensate so the text and the line share a center.
+        let textAdjustment: CGFloat = 3.0
+        let lineY = self.bounds.height / 2 - 0.5
         // NSTextField truncates the last glyph when the frame matches
         // intrinsicContentSize exactly, so reserve padding.
         let labelWidth = size.width + 8
-        self.label.frame = NSRect(x: (self.bounds.width - labelWidth) / 2, y: (self.bounds.height - size.height) / 2, width: labelWidth, height: size.height)
+        self.label.frame = NSRect(
+            x: (self.bounds.width - labelWidth) / 2,
+            y: (self.bounds.height - size.height) / 2 + textAdjustment,
+            width: labelWidth,
+            height: size.height
+        )
 
         let rightInset: CGFloat = self.accessory != nil ? 24 : 0
         self.leftLine.frame = NSRect(x: 0, y: lineY, width: max(self.label.frame.minX - gap, 0), height: 1)

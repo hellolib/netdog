@@ -13,6 +13,30 @@ enum UsageResetPolicy: String {
     case monthly
 }
 
+enum PopupSection: String, CaseIterable {
+    case usageHistory
+    case connectivityHistory
+    case traffic
+    case interfaceInfo
+    case address
+    case processes
+
+    var title: String {
+        switch self {
+        case .usageHistory: return "负载历史"
+        case .connectivityHistory: return "连接历史"
+        case .traffic: return "流量统计"
+        case .interfaceInfo: return "接口信息"
+        case .address: return "地址"
+        case .processes: return "进程排行"
+        }
+    }
+
+    var key: String {
+        return "Network_popupShow_\(self.rawValue)"
+    }
+}
+
 enum Settings {
     static let maxProcessCount = 15
     static let defaultUpdateInterval: Double = 1
@@ -45,7 +69,7 @@ enum Settings {
         static let chartScale = "Network_chartScale"
         static let chartFixedScale = "Network_chartFixedScale"
         static let chartFixedScaleSize = "Network_chartFixedScaleSize"
-        static let reverseOrder = "Network_reverseOrder"
+        static let uploadOnTop = "Network_uploadOnTop"
         static let downloadColor = "Network_downloadColor"
         static let uploadColor = "Network_uploadColor"
 
@@ -65,7 +89,7 @@ enum Settings {
     }
 
     static func registerDefaults() {
-        UserDefaults.standard.register(defaults: [
+        var defaults: [String: Any] = [
             Keys.updateInterval: defaultUpdateInterval,
             Keys.processCount: defaultProcessCount,
             Keys.connectivityMode: defaultConnectivityMode,
@@ -85,7 +109,7 @@ enum Settings {
             Keys.chartScale: "none",
             Keys.chartFixedScale: 12,
             Keys.chartFixedScaleSize: "MB",
-            Keys.reverseOrder: false,
+            Keys.uploadOnTop: true,
             Keys.downloadColor: defaultDownloadColor,
             Keys.uploadColor: defaultUploadColor,
             Keys.emojiCC: true,
@@ -100,7 +124,17 @@ enum Settings {
             Keys.totalDownload: 0,
             Keys.usageResetNext: 0,
             Keys.usageResetTS: 0
-        ])
+        ]
+        PopupSection.allCases.forEach { defaults[$0.key] = true }
+        UserDefaults.standard.register(defaults: defaults)
+    }
+
+    static var popupSections: [PopupSection] {
+        return PopupSection.allCases.filter { self.popupSectionEnabled($0) }
+    }
+
+    static func popupSectionEnabled(_ section: PopupSection) -> Bool {
+        return UserDefaults.standard.bool(forKey: section.key)
     }
 
     static var updateInterval: Double {
@@ -207,8 +241,12 @@ enum Settings {
         return Units.bytes(self.chartFixedScale, unit: self.chartFixedScaleSize)
     }
 
+    static var uploadOnTop: Bool {
+        return UserDefaults.standard.bool(forKey: Keys.uploadOnTop)
+    }
+
     static var reverseOrder: Bool {
-        return UserDefaults.standard.bool(forKey: Keys.reverseOrder)
+        return !self.uploadOnTop
     }
 
     static var downloadColor: NSColor {
@@ -291,10 +329,11 @@ enum Settings {
             Keys.publicIP, Keys.interfaceDetails, Keys.readerType, Keys.interfaceName, Keys.base,
             Keys.speedUnit, Keys.usageReset, Keys.publicIPRefresh, Keys.vpnMode, Keys.connectivityInterval,
             Keys.chartHistory, Keys.chartScale, Keys.chartFixedScale, Keys.chartFixedScaleSize,
-            Keys.reverseOrder, Keys.downloadColor, Keys.uploadColor, Keys.emojiCC, Keys.menuBarMode,
+            Keys.uploadOnTop, Keys.downloadColor, Keys.uploadColor, Keys.emojiCC, Keys.menuBarMode,
             Keys.menuBarIcon, Keys.menuBarUnits, Keys.menuBarMono, Keys.thresholdState, Keys.threshold,
             Keys.thresholdSize
         ].forEach { defaults.removeObject(forKey: $0) }
+        PopupSection.allCases.forEach { defaults.removeObject(forKey: $0.key) }
     }
 
     private static func color(from hex: String, fallback: NSColor) -> NSColor {

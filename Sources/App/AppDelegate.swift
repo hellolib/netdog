@@ -97,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem.length = self.speedView.preferredWidth
         self.speedView.configure()
         self.chart.reconfigure()
+        self.popupView.applySettings()
 
         self.reader?.setInterval(Settings.updateInterval)
         self.connectivityReader?.setInterval(TimeInterval(Settings.connectivityInterval))

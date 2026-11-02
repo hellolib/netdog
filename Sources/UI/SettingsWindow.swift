@@ -5,6 +5,63 @@ private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+private final class HairlineView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        NSColor.separatorColor.setFill()
+        self.bounds.fill()
+    }
+}
+
+/// A single settings row: title on the left, control on the right, hairline separator.
+private final class SettingsRowView: NSView {
+    private let label = NSTextField(labelWithString: "")
+    private let control: NSView
+    private let separator = HairlineView()
+
+    init(title: String, control: NSView, showSeparator: Bool = true) {
+        self.control = control
+        super.init(frame: .zero)
+        self.translatesAutoresizingMaskIntoConstraints = false
+
+        self.label.font = .systemFont(ofSize: 12)
+        self.label.textColor = .labelColor
+        self.label.lineBreakMode = .byClipping
+        self.label.translatesAutoresizingMaskIntoConstraints = false
+
+        control.translatesAutoresizingMaskIntoConstraints = false
+
+        self.separator.translatesAutoresizingMaskIntoConstraints = false
+        self.separator.isHidden = !showSeparator
+
+        self.label.stringValue = title
+        self.addSubview(self.label)
+        self.addSubview(control)
+        self.addSubview(self.separator)
+
+        NSLayoutConstraint.activate([
+            self.heightAnchor.constraint(equalToConstant: 30),
+
+            self.label.leadingAnchor.constraint(equalTo: self.leadingAnchor),
+            self.label.centerYAnchor.constraint(equalTo: self.centerYAnchor),
+            self.label.widthAnchor.constraint(equalToConstant: 150),
+
+            control.trailingAnchor.constraint(equalTo: self.trailingAnchor),
+            control.centerYAnchor.constraint(equalTo: self.centerYAnchor),
+            control.leadingAnchor.constraint(greaterThanOrEqualTo: self.label.trailingAnchor, constant: 8),
+
+            self.separator.leadingAnchor.constraint(equalTo: self.leadingAnchor),
+            self.separator.trailingAnchor.constraint(equalTo: self.trailingAnchor),
+            self.separator.bottomAnchor.constraint(equalTo: self.bottomAnchor),
+            self.separator.heightAnchor.constraint(equalToConstant: 1)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+}
+
 /// Scrollable settings window covering the full Stats network option set.
 final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     var onChange: (() -> Void)?
@@ -26,7 +83,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 680),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -56,7 +113,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         self.stack.orientation = .vertical
         self.stack.alignment = .leading
-        self.stack.spacing = 10
+        self.stack.spacing = 22
         self.stack.translatesAutoresizingMaskIntoConstraints = false
 
         let document = FlippedView()
@@ -73,10 +130,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
             document.widthAnchor.constraint(equalTo: self.scrollView.contentView.widthAnchor),
 
-            self.stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 18),
-            self.stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 20),
-            self.stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -20),
-            self.stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -18)
+            self.stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 22),
+            self.stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 22),
+            self.stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -22),
+            self.stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -22)
         ])
 
         self.populate()
@@ -104,6 +161,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             ))
         ])
 
+        self.thresholdRow = self.row("阈值", control: self.makeThresholdControl())
+
         self.addSection("显示", rows: [
             self.row("速率基准", control: self.makePopup(
                 key: Settings.Keys.base,
@@ -128,9 +187,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             self.makeSwitchRow("菜单栏显示单位", key: Settings.Keys.menuBarUnits, state: Settings.menuBarUnits),
             self.makeSwitchRow("单色模式", key: Settings.Keys.menuBarMono, state: Settings.menuBarMono),
             self.makeSwitchRow("速率低于阈值时显示 0", key: Settings.Keys.thresholdState, state: Settings.thresholdEnabled),
-            self.row("阈值", control: self.makeThresholdControl()),
+            self.thresholdRow!,
             self.makeSwitchRow("公网 IP 显示国旗", key: Settings.Keys.emojiCC, state: Settings.emojiCC)
         ])
+
+        self.fixedScaleRow = self.row("固定上限", control: self.makeFixedScaleControl())
 
         self.addSection("图表", rows: [
             self.row("历史采样点", control: self.makePopup(
@@ -143,11 +204,15 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
                 items: [("线性", "none"), ("平方", "square"), ("立方", "cube"), ("对数", "logarithmic"), ("固定上限", "fixed")],
                 selected: Settings.chartScale.rawValue
             )),
-            self.row("固定上限", control: self.makeFixedScaleControl()),
-            self.makeSwitchRow("上传显示在上方", key: Settings.Keys.reverseOrder, state: Settings.reverseOrder),
+            self.fixedScaleRow!,
+            self.makeSwitchRow("上传显示在上方", key: Settings.Keys.uploadOnTop, state: Settings.uploadOnTop),
             self.row("下载颜色", control: self.makeColorWell(key: Settings.Keys.downloadColor, color: Settings.downloadColor)),
             self.row("上传颜色", control: self.makeColorWell(key: Settings.Keys.uploadColor, color: Settings.uploadColor))
         ])
+
+        self.addSection("弹窗栏目", rows: PopupSection.allCases.map { section in
+            self.makeSwitchRow(section.title, key: section.key, state: Settings.popupSectionEnabled(section))
+        })
 
         self.addSection("用量统计", rows: [
             self.row("重置策略", control: self.makePopup(
@@ -193,53 +258,63 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         versionLabel.textColor = .tertiaryLabelColor
         footer.addArrangedSubview(resetButton)
         footer.addArrangedSubview(versionLabel)
+
         self.stack.addArrangedSubview(footer)
+        footer.widthAnchor.constraint(equalTo: self.stack.widthAnchor).isActive = true
 
         self.updateVisibility()
     }
 
     private func addSection(_ title: String, rows: [NSView]) {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         titleLabel.textColor = .secondaryLabelColor
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let section = NSStackView(views: [titleLabel] + rows)
+        let card = RoundedPanelView(fill: .controlBackgroundColor, radius: 10)
+        card.translatesAutoresizingMaskIntoConstraints = false
+
+        let inner = NSStackView(views: rows)
+        inner.orientation = .vertical
+        inner.spacing = 0
+        inner.alignment = .leading
+        inner.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(inner)
+
+        NSLayoutConstraint.activate([
+            inner.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            inner.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            inner.topAnchor.constraint(equalTo: card.topAnchor, constant: 4),
+            inner.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -4)
+        ])
+        rows.forEach { $0.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true }
+
+        let section = NSStackView(views: [titleLabel, card])
         section.orientation = .vertical
         section.alignment = .leading
-        section.spacing = 8
+        section.spacing = 6
+        section.translatesAutoresizingMaskIntoConstraints = false
 
         self.stack.addArrangedSubview(section)
         section.widthAnchor.constraint(equalTo: self.stack.widthAnchor).isActive = true
-        for row in rows {
-            row.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
-        }
+        card.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
     }
 
     // MARK: - controls
 
     private func row(_ title: String, control: NSView) -> NSView {
-        let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 12)
-        label.textColor = .labelColor
-        label.lineBreakMode = .byClipping
-        label.widthAnchor.constraint(equalToConstant: 150).isActive = true
-
-        let row = NSStackView(views: [label, control])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 10
-        return row
+        return SettingsRowView(title: title, control: control)
     }
 
     private func makeSwitchRow(_ title: String, key: String, state: Bool) -> NSView {
-        let check = NSButton(checkboxWithTitle: title, target: self, action: #selector(self.switchChanged(_:)))
+        let check = NSButton(checkboxWithTitle: "", target: self, action: #selector(self.switchChanged(_:)))
         check.identifier = NSUserInterfaceItemIdentifier(key)
         check.state = state ? .on : .off
-        check.font = .systemFont(ofSize: 12)
-        return check
+        check.focusRingType = .none
+        return SettingsRowView(title: title, control: check)
     }
 
-    private func makePopup(key: String, items: [(String, Any)], selected: Any) -> NSPopUpButton {
+    private func makePopup(key: String, items: [(String, Any)], selected: Any, width: CGFloat = 260) -> NSPopUpButton {
         let popup = NSPopUpButton()
         popup.identifier = NSUserInterfaceItemIdentifier(key)
         for (title, value) in items {
@@ -249,7 +324,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         }
         popup.target = self
         popup.action = #selector(self.popupChanged(_:))
-        popup.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        popup.widthAnchor.constraint(equalToConstant: width).isActive = true
 
         for item in popup.itemArray {
             if let value = item.representedObject as? String, let selected = selected as? String, value == selected {
@@ -303,13 +378,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let unit = self.makePopup(
             key: Settings.Keys.thresholdSize,
             items: SizeUnit.allCases.map { ("\($0.rawValue)", $0.rawValue) },
-            selected: Settings.thresholdSize
+            selected: Settings.thresholdSize,
+            width: 90
         )
 
         let row = NSStackView(views: [value, unit])
         row.orientation = .horizontal
         row.spacing = 8
-        self.thresholdRow = row
         return row
     }
 
@@ -326,13 +401,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let unit = self.makePopup(
             key: Settings.Keys.chartFixedScaleSize,
             items: SizeUnit.allCases.map { ("\($0.rawValue)", $0.rawValue) },
-            selected: Settings.chartFixedScaleSize
+            selected: Settings.chartFixedScaleSize,
+            width: 90
         )
 
         let row = NSStackView(views: [value, unit])
         row.orientation = .horizontal
         row.spacing = 8
-        self.fixedScaleRow = row
         return row
     }
 
@@ -353,7 +428,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         field.font = .systemFont(ofSize: 12)
         field.placeholderString = placeholder
         field.delegate = self
-        field.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        field.widthAnchor.constraint(equalToConstant: 280).isActive = true
         return field
     }
 
@@ -377,11 +452,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         self.loginStatus.lineBreakMode = .byClipping
         self.loginStatus.stringValue = LoginItem.statusText
 
-        let row = NSStackView(views: [check, self.loginStatus])
-        row.orientation = .vertical
-        row.alignment = .leading
-        row.spacing = 4
-        return row
+        let column = NSStackView(views: [check, self.loginStatus])
+        column.orientation = .vertical
+        column.alignment = .trailing
+        column.spacing = 2
+        return SettingsRowView(title: "登录项", control: column, showSeparator: false)
     }
 
     // MARK: - actions

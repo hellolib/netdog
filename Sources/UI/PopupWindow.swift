@@ -4,19 +4,19 @@ final class PopupHeaderView: NSView {
     var onSettings: (() -> Void)?
     var onActivityMonitor: (() -> Void)?
 
-    private let titleField = NSTextField(labelWithString: "网络")
+    private let titleField = NSTextField(labelWithString: "netdog")
     private let activityButton = NSButton()
     private let settingsButton = NSButton()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
-        self.titleField.font = .systemFont(ofSize: 16, weight: .regular)
+        self.titleField.font = .systemFont(ofSize: 13, weight: .regular)
         self.titleField.alignment = .center
         self.titleField.textColor = .textColor
         self.titleField.lineBreakMode = .byClipping
 
-        self.activityButton.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: nil)
+        self.activityButton.image = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: nil)
         self.activityButton.bezelStyle = .regularSquare
         self.activityButton.isBordered = false
         self.activityButton.imageScaling = .scaleProportionallyDown
@@ -25,7 +25,7 @@ final class PopupHeaderView: NSView {
         self.activityButton.target = self
         self.activityButton.action = #selector(self.openActivityMonitor)
 
-        self.settingsButton.image = NSImage(systemSymbolName: "command", accessibilityDescription: nil)
+        self.settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         self.settingsButton.bezelStyle = .regularSquare
         self.settingsButton.isBordered = false
         self.settingsButton.imageScaling = .scaleProportionallyDown

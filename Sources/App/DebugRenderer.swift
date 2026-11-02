@@ -7,7 +7,7 @@ enum DebugRenderer {
         try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         _ = NSApplication.shared
 
-        let chart = NetworkChartView(num: 180)
+        let chart = NetworkChartView()
         for index in 0..<180 {
             let t = Double(index)
             chart.addValue(
@@ -52,6 +52,14 @@ enum DebugRenderer {
         popup.appearance = NSAppearance(named: .aqua)
         render(view: popup, to: directory + "/popup.png", background: .windowBackgroundColor)
 
+        var unauthorized = usage
+        unauthorized.wifiAuthorization = .notDetermined
+        unauthorized.wifi.ssid = nil
+        let authPopup = PopupView(chart: NetworkChartView())
+        authPopup.update(unauthorized)
+        authPopup.appearance = NSAppearance(named: .aqua)
+        render(view: authPopup, to: directory + "/popup-auth.png", background: .windowBackgroundColor)
+
         let container = PopupContainerView(content: popup)
         container.appearance = NSAppearance(named: .aqua)
         let windowSize = container.updateLayout(contentSize: popup.frame.size, visibleHeight: 2000)
@@ -59,7 +67,7 @@ enum DebugRenderer {
         render(view: container, to: directory + "/popup-window.png", background: NSColor(calibratedWhite: 0.72, alpha: 1))
 
         // Scrollable variant (small screen): verifies the 20pt scroller reservation.
-        let short = PopupContainerView(content: PopupView(chart: NetworkChartView(num: 180)))
+        let short = PopupContainerView(content: PopupView(chart: NetworkChartView()))
         short.appearance = NSAppearance(named: .aqua)
         let shortSize = short.updateLayout(contentSize: popup.frame.size, visibleHeight: 600)
         short.frame = NSRect(origin: .zero, size: shortSize)
