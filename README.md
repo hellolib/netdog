@@ -13,6 +13,10 @@
   <a href="README.zh-CN.md">简体中文</a>
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
 ## Features
 
 - Live download/upload speed in the menu bar (two-row or one-row, dots/arrows/no icon, units toggle, monochrome, idle threshold)
