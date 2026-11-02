@@ -3,6 +3,24 @@ import AppKit
 Settings.registerDefaults()
 
 let arguments = CommandLine.arguments
+if let index = arguments.firstIndex(of: "--login-item"), index + 1 < arguments.count {
+    switch arguments[index + 1] {
+    case "enable":
+        if let error = LoginItem.set(true) {
+            FileHandle.standardError.write(Data(("error=\(error)\n").utf8))
+            exit(1)
+        }
+    case "disable":
+        if let error = LoginItem.set(false) {
+            FileHandle.standardError.write(Data(("error=\(error)\n").utf8))
+            exit(1)
+        }
+    default:
+        break
+    }
+    print("login-item=\(LoginItem.statusText)")
+    exit(0)
+}
 if arguments.contains("--details") {
     CLISampler.details()
     exit(0)
