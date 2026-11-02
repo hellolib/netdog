@@ -43,7 +43,7 @@
 
 ## Install
 
-1. Download `NetDog-0.2.2.zip` from [Releases](https://github.com/hellolib/netdog/releases).
+1. Download `NetDog-0.2.3.zip` from [Releases](https://github.com/hellolib/netdog/releases).
 2. Unzip and drag `NetDog.app` into `/Applications`.
 3. The app is ad-hoc signed. If macOS blocks the first launch, right-click the app → **Open**.
 

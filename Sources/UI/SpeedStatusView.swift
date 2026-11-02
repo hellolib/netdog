@@ -13,7 +13,7 @@ final class SpeedStatusView: NSView {
     private var downColor: NSColor = .systemBlue
     private var upColor: NSColor = .systemRed
 
-    private let font = NSFont.systemFont(ofSize: 9, weight: .light)
+    private let font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .light)
     private static let dotSize: CGFloat = 6
     private static let margin: CGFloat = 2
 
@@ -26,6 +26,9 @@ final class SpeedStatusView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
+    var onWidthChange: ((CGFloat) -> Void)?
+    private var lastReportedWidth: CGFloat = 0
+
     func configure() {
         self.mode = Settings.menuBarMode
         self.iconStyle = Settings.menuBarIcon
@@ -34,16 +37,48 @@ final class SpeedStatusView: NSView {
         self.downColor = Settings.downloadColor
         self.upColor = Settings.uploadColor
         self.needsDisplay = true
+        self.notifyWidthIfNeeded()
     }
 
+    private func measure(_ string: String) -> CGFloat {
+        return (string as NSString).size(withAttributes: [.font: self.font]).width
+    }
+
+    private func text(for value: Int64) -> String {
+        return Units.readableSpeed(value, omitUnits: !self.showsUnits)
+    }
+
+    private var iconLeading: CGFloat {
+        switch self.iconStyle {
+        case "dots": return Self.margin + Self.dotSize + 4
+        case "arrows": return Self.margin + 10 + 3
+        default: return Self.margin
+        }
+    }
+
+    /// Width that exactly fits the current values (plus a 2pt trailing margin).
     var preferredWidth: CGFloat {
-        return self.mode == "oneRow" ? 104 : 58
+        if self.mode == "oneRow" {
+            let down = self.measure("↓" + self.text(for: self.download))
+            let up = self.measure("↑" + self.text(for: self.upload))
+            return ceil(down + 6 + up + Self.margin * 2)
+        }
+        let value = max(self.measure(self.text(for: self.download)), self.measure(self.text(for: self.upload)))
+        return ceil(self.iconLeading + value + Self.margin)
+    }
+
+    private func notifyWidthIfNeeded() {
+        let width = self.preferredWidth
+        guard abs(width - self.lastReportedWidth) > 0.5 else { return }
+        self.lastReportedWidth = width
+        self.onWidthChange?(width)
     }
 
     func update(download: Int64, upload: Int64) {
         self.download = download
         self.upload = upload
         self.needsDisplay = true
+        self.notifyWidthIfNeeded()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -86,10 +121,18 @@ final class SpeedStatusView: NSView {
             .foregroundColor: color
         ]
         let size = text.size(withAttributes: attributes)
+        // Keep a constant gap after the icon instead of right-aligning in the
+        // full width (which left a huge gap for short values).
+        let textX: CGFloat
+        switch self.iconStyle {
+        case "dots": textX = Self.margin + Self.dotSize + 4
+        case "arrows": textX = Self.margin + 10 + 3
+        default: textX = Self.margin
+        }
         let textRect = NSRect(
-            x: self.bounds.width - size.width - Self.margin,
+            x: textX,
             y: y + (rowHeight - size.height) / 2,
-            width: size.width,
+            width: min(size.width, self.bounds.width - textX - Self.margin),
             height: size.height
         )
         text.draw(in: textRect, withAttributes: attributes)

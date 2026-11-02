@@ -52,6 +52,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem.length = self.speedView.preferredWidth
         self.speedView.frame = button.bounds
         self.speedView.autoresizingMask = [.width, .height]
+        self.speedView.onWidthChange = { [weak self] width in
+            guard let self else { return }
+            self.statusItem.length = width
+            if let button = self.statusItem.button {
+                self.speedView.frame = button.bounds
+            }
+        }
         button.title = ""
         button.addSubview(self.speedView)
         button.toolTip = "NetDog"
@@ -94,8 +101,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings() {
-        self.statusItem.length = self.speedView.preferredWidth
         self.speedView.configure()
+        self.statusItem.length = self.speedView.preferredWidth
+        if let button = self.statusItem.button {
+            self.speedView.frame = button.bounds
+        }
         self.chart.reconfigure()
         self.popupView.applySettings()
 
