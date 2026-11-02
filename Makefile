@@ -18,10 +18,11 @@ all: app
 
 app: $(BIN)
 
-$(BIN): $(SOURCES) Info.plist Makefile Assets/NetDog.icns
+$(BIN): $(SOURCES) Info.plist Makefile Assets/NetDog.icns Assets/GitHubMark.png
 	@mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	@cp Info.plist $(APP)/Contents/Info.plist
 	@cp Assets/NetDog.icns $(APP)/Contents/Resources/NetDog.icns
+	@cp Assets/GitHubMark.png $(APP)/Contents/Resources/GitHubMark.png
 	$(SWIFTC) $(SWIFTFLAGS) -o $(BIN) $(SOURCES)
 	$(CODESIGN) $(APP)
 	@echo "==> $(APP)"

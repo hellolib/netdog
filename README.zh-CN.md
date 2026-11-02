@@ -43,7 +43,7 @@
 
 ## 安装
 
-1. 从 [Releases](https://github.com/hellolib/netdog/releases) 下载 `NetDog-0.2.1.zip`
+1. 从 [Releases](https://github.com/hellolib/netdog/releases) 下载 `NetDog-0.2.2.zip`
 2. 解压后把 `NetDog.app` 拖进 `/Applications`
 3. 当前为 ad-hoc 签名；首次打开若被系统拦截，请右键 → 打开
 

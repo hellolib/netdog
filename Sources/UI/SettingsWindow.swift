@@ -256,8 +256,22 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let versionLabel = NSTextField(labelWithString: "NetDog \(version)")
         versionLabel.font = .systemFont(ofSize: 10)
         versionLabel.textColor = .tertiaryLabelColor
+        let repoButton = NSButton(image: Self.githubIcon(), target: self, action: #selector(self.openRepository))
+        repoButton.isBordered = false
+        repoButton.imageScaling = .scaleProportionallyDown
+        repoButton.contentTintColor = .linkColor
+        repoButton.toolTip = "GitHub 仓库"
+        repoButton.focusRingType = .none
+        repoButton.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        repoButton.heightAnchor.constraint(equalToConstant: 18).isActive = true
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
         footer.addArrangedSubview(resetButton)
         footer.addArrangedSubview(versionLabel)
+        footer.addArrangedSubview(spacer)
+        footer.addArrangedSubview(repoButton)
 
         self.stack.addArrangedSubview(footer)
         footer.widthAnchor.constraint(equalTo: self.stack.widthAnchor).isActive = true
@@ -514,6 +528,24 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             self.loginCheck?.state = enable ? .off : .on
         }
         self.loginStatus.stringValue = LoginItem.statusText
+    }
+
+    private static func githubIcon() -> NSImage {
+        let image: NSImage
+        if let url = Bundle.main.url(forResource: "GitHubMark", withExtension: "png"),
+           let loaded = NSImage(contentsOf: url) {
+            image = loaded
+        } else {
+            image = NSImage(systemSymbolName: "link", accessibilityDescription: nil) ?? NSImage()
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    @objc private func openRepository() {
+        if let url = URL(string: "https://github.com/hellolib/netdog") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func resetTapped() {
