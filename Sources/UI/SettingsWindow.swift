@@ -74,7 +74,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private var thresholdRow: NSView?
     private var publicIPRefreshPopup: NSPopUpButton?
     private var loginCheck: NSButton?
-    private let loginStatus = NSTextField(labelWithString: "")
 
     private let intervals: [Double] = [1, 2, 3, 5, 10, 15, 30, 60]
     private let processOptions = [0, 3, 5, 8, 10, 15]
@@ -212,15 +211,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         self.addSection("弹窗栏目", rows: PopupSection.allCases.map { section in
             self.makeSwitchRow(section.title, key: section.key, state: Settings.popupSectionEnabled(section))
-        })
-
-        self.addSection("后台计算", rows: [
-            self.makeSwitchRow(
-                "关闭弹窗后停止非必要计算",
-                key: Settings.Keys.savePowerWhenPopupClosed,
-                state: Settings.savePowerWhenPopupClosed
-            )
-        ])
+        } + [self.makeDataComputationRow()])
 
         self.addSection("用量统计", rows: [
             self.row("重置策略", control: self.makePopup(
@@ -357,6 +348,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
                 popup.select(item)
                 break
             }
+            if let value = item.representedObject as? Bool, let selected = selected as? Bool, value == selected {
+                popup.select(item)
+                break
+            }
             if let value = item.representedObject as? Double, let selected = selected as? Double, value == selected {
                 popup.select(item)
                 break
@@ -464,28 +459,30 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         return popup
     }
 
+    private func makeDataComputationRow() -> NSView {
+        return self.row("数据计算", control: self.makePopup(
+            key: Settings.Keys.savePowerWhenPopupClosed,
+            items: [("打开弹窗开始计算", true), ("始终后台计算", false)],
+            selected: Settings.savePowerWhenPopupClosed,
+            width: 160
+        ))
+    }
+
     private func makeLoginRow() -> NSView {
         let check = NSButton(checkboxWithTitle: "登录时自动启动", target: self, action: #selector(self.loginToggled))
         check.state = LoginItem.isEnabled ? .on : .off
         self.loginCheck = check
 
-        self.loginStatus.font = .systemFont(ofSize: 10)
-        self.loginStatus.textColor = .secondaryLabelColor
-        self.loginStatus.lineBreakMode = .byClipping
-        self.loginStatus.stringValue = LoginItem.statusText
-
-        let column = NSStackView(views: [check, self.loginStatus])
-        column.orientation = .vertical
-        column.alignment = .trailing
-        column.spacing = 2
-        return SettingsRowView(title: "登录项", control: column, showSeparator: false)
+        return SettingsRowView(title: "登录项", control: check, showSeparator: false)
     }
 
     // MARK: - actions
 
     @objc private func popupChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue, let value = sender.selectedItem?.representedObject else { return }
-        if let number = value as? Int {
+        if let bool = value as? Bool {
+            Settings.set(bool, for: key)
+        } else if let number = value as? Int {
             Settings.set(number, for: key)
         } else {
             Settings.set(value as? String ?? "", for: key)
@@ -535,7 +532,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             alert.runModal()
             self.loginCheck?.state = enable ? .off : .on
         }
-        self.loginStatus.stringValue = LoginItem.statusText
     }
 
     private static func githubIcon() -> NSImage {
