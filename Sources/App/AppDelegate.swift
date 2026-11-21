@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var processReader: ProcessReader?
     private var connectivityReader: ConnectivityReader?
     private var lastUsage: NetworkUsage?
+    private var popupVisible = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         LocationAuth.shared.onChange = { [weak self] in
@@ -36,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.configurePopup()
         self.configureReader()
         self.observeSleepWake()
+        self.updateBackgroundSampling()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -116,8 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             httpURL: Settings.httpURL,
             mode: Settings.connectivityMode
         )
-        self.popupView.processLimit = Settings.processCount
-        if Settings.processCount == 0 {
+        self.popupView.processLimit = Settings.processPopupEnabled ? Settings.processCount : 0
+        if !Settings.processPopupEnabled {
             self.popupView.clearProcesses()
         }
         if Settings.publicIPEnabled {
@@ -126,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.popupView.clearPublicIP()
         }
         self.schedulePublicIPRefresh()
+        self.updateBackgroundSampling()
     }
 
     // MARK: - popup
@@ -147,10 +150,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func togglePopup() {
         guard let button = self.statusItem.button else { return }
-        if let usage = self.lastUsage {
+        let willShow = !self.popupWindow.isVisible
+        if willShow, let usage = self.lastUsage {
             self.popupView.update(usage)
         }
         self.popupWindow.toggle(at: button)
+        self.popupVisible = self.popupWindow.isVisible
+        self.updateBackgroundSampling()
     }
 
     private func openActivityMonitor() {
@@ -187,11 +193,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let processReader = ProcessReader { [weak self] processes in
             DispatchQueue.main.async {
-                self?.popupView.updateProcesses(processes)
+                guard let self, self.popupVisible, Settings.processPopupEnabled else { return }
+                self.popupView.updateProcesses(processes)
             }
         }
         self.processReader = processReader
-        processReader.start()
 
         let connectivityReader = ConnectivityReader { [weak self] value in
             DispatchQueue.main.async {
@@ -199,20 +205,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         self.connectivityReader = connectivityReader
-        connectivityReader.start()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             if Settings.publicIPEnabled {
                 self?.refreshPublicIP()
             }
         }
-        self.schedulePublicIPRefresh()
+        self.updateBackgroundSampling()
     }
 
     private func schedulePublicIPRefresh() {
         self.publicIPTimer?.invalidate()
         self.publicIPTimer = nil
         guard Settings.publicIPEnabled, let interval = Settings.publicIPRefreshSeconds else { return }
+        guard self.popupVisible || !Settings.savePowerWhenPopupClosed else { return }
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.refreshPublicIP()
         }
@@ -225,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.popupView.clearPublicIP()
             return
         }
+        guard self.popupVisible || !Settings.savePowerWhenPopupClosed else { return }
         PublicIP.fetch { [weak self] address in
             guard let self, let address, Settings.publicIPEnabled else { return }
             DispatchQueue.main.async {
@@ -239,18 +246,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         center.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
     }
 
+    private func updateBackgroundSampling() {
+        let processEnabled = self.popupVisible && Settings.processPopupEnabled
+        let connectivityEnabled = self.popupVisible && Settings.connectivityPopupEnabled
+
+        if processEnabled {
+            self.processReader?.start()
+        } else {
+            self.processReader?.stop()
+        }
+
+        if connectivityEnabled {
+            self.connectivityReader?.start()
+        } else {
+            self.connectivityReader?.stop()
+        }
+
+        if self.popupVisible || !Settings.savePowerWhenPopupClosed {
+            self.schedulePublicIPRefresh()
+        } else {
+            self.publicIPTimer?.invalidate()
+            self.publicIPTimer = nil
+        }
+    }
+
     @objc private func willSleep() {
         self.popupWindow.hide()
+        self.popupVisible = false
+        self.updateBackgroundSampling()
         self.reader?.persistNow()
         self.reader?.stop()
-        self.processReader?.stop()
-        self.connectivityReader?.stop()
     }
 
     @objc private func didWake() {
         self.reader?.start()
-        self.processReader?.start()
-        self.connectivityReader?.start()
+        self.updateBackgroundSampling()
     }
 
     private func toolTip(for usage: NetworkUsage) -> String {

@@ -6,9 +6,8 @@ enum PopupMetrics {
     static let headerHeight: CGFloat = 42
     static let rowHeight: CGFloat = 22
     static let sectionHeight: CGFloat = 30
-    static let dashboardHeight: CGFloat = 90
-    static let chartHeight: CGFloat = 90
-    static let connectivityHeight: CGFloat = 30
+    static let dashboardHeight: CGFloat = 60
+    static let chartHeight: CGFloat = 60
     static let radius: CGFloat = 6
     static let maxProcessRows = Settings.maxProcessCount
 }
@@ -24,10 +23,8 @@ final class PopupView: NSView {
     var onResetTotals: (() -> Void)?
 
     private let chart: NetworkChartView
-    private let connectivityChart = GridChartView()
     private let dashboard = DashboardPanel()
     private let chartContainer = RoundedPanelView(fill: NSColor.lightGray.withAlphaComponent(0.1), radius: PopupMetrics.radius)
-    private let connectivityContainer = RoundedPanelView(fill: NSColor.lightGray.withAlphaComponent(0.1), radius: 3)
 
     private let totalUpRow = TotalRowView(title: "总上传", color: .systemRed)
     private let totalDownRow = TotalRowView(title: "总下载", color: .systemBlue)
@@ -93,10 +90,6 @@ final class PopupView: NSView {
         self.chart.frame = self.chartContainer.bounds.insetBy(dx: 1, dy: 1)
         self.chartContainer.addSubview(self.chart)
 
-        self.connectivityContainer.setFrameSize(NSSize(width: PopupMetrics.width, height: PopupMetrics.connectivityHeight))
-        self.connectivityChart.frame = self.connectivityContainer.bounds.insetBy(dx: 1, dy: 1)
-        self.connectivityContainer.addSubview(self.connectivityChart)
-
         self.locationButton.bezelStyle = .rounded
         self.locationButton.controlSize = .small
         self.locationButton.font = .systemFont(ofSize: 11)
@@ -132,7 +125,6 @@ final class PopupView: NSView {
         }
 
         let usageHeader = SectionHeaderView(title: "负载历史")
-        let connectivityHeader = SectionHeaderView(title: "连接历史")
         let trafficHeader = SectionHeaderView(title: "接口", accessory: resetButton)
         let interfaceHeader = SectionHeaderView(title: "接口", accessory: detailsButton)
         let addressHeader = SectionHeaderView(title: "地址", accessory: refreshButton)
@@ -140,7 +132,6 @@ final class PopupView: NSView {
         self.items = [
             self.dashboard,
             usageHeader, self.chartContainer,
-            connectivityHeader, self.connectivityContainer,
             trafficHeader,
             self.totalUpRow, self.totalDownRow, self.statusRow, self.internetRow, self.latencyRow, self.jitterRow,
             interfaceHeader,
@@ -151,7 +142,6 @@ final class PopupView: NSView {
         ] + self.processRows
 
         self.registerSection(.usageHistory, [usageHeader, self.chartContainer])
-        self.registerSection(.connectivityHistory, [connectivityHeader, self.connectivityContainer])
         self.registerSection(.traffic, [
             trafficHeader, self.totalUpRow, self.totalDownRow, self.statusRow,
             self.internetRow, self.latencyRow, self.jitterRow
@@ -309,7 +299,6 @@ final class PopupView: NSView {
         self.internetRow.set(status: value.status)
         self.latencyRow.setValue(value.status ? "\(Int(value.latency.rounded())) ms" : "")
         self.jitterRow.setValue(value.status ? "\(Int(value.jitter.rounded())) ms" : "")
-        self.connectivityChart.addValue(value.status)
     }
 
     func updatePublicIP(_ address: PublicAddress?) {

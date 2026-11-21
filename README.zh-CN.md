@@ -20,7 +20,7 @@
 ## 功能
 
 - 菜单栏实时上下行速率（双行/单行、圆点/箭头/无图标、单位开关、单色、空闲阈值）
-- Stats 风格弹窗：负载历史曲线、连接历史点阵、流量统计、接口与 Wi-Fi 详情、地址、进程排行，每个栏目可独立开关
+- Stats 风格弹窗：负载历史曲线、流量统计、接口与 Wi-Fi 详情、地址、进程排行，每个栏目可独立开关
 - 带宽数据源：接口计数器（`NET_RT_IFLIST2`）或按进程统计（`nettop`）
 - 连通性检测：ICMP 优先、HTTP 兜底，显示延迟与抖动
 - 公网 IP 查询（`ip.mac-stats.com`），可配置自动刷新
@@ -43,7 +43,7 @@
 
 ## 安装
 
-1. 从 [Releases](https://github.com/hellolib/netdog/releases) 下载 `NetDog-0.2.3.zip`
+1. 从 [Releases](https://github.com/hellolib/netdog/releases) 下载 `NetDog-0.2.4.zip`
 2. 解压后把 `NetDog.app` 拖进 `/Applications`
 3. 当前为 ad-hoc 签名；首次打开若被系统拦截，请右键 → 打开
 

@@ -214,6 +214,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             self.makeSwitchRow(section.title, key: section.key, state: Settings.popupSectionEnabled(section))
         })
 
+        self.addSection("后台计算", rows: [
+            self.makeSwitchRow(
+                "关闭弹窗后停止非必要计算",
+                key: Settings.Keys.savePowerWhenPopupClosed,
+                state: Settings.savePowerWhenPopupClosed
+            )
+        ])
+
         self.addSection("用量统计", rows: [
             self.row("重置策略", control: self.makePopup(
                 key: Settings.Keys.usageReset,

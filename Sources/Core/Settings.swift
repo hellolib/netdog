@@ -15,7 +15,6 @@ enum UsageResetPolicy: String {
 
 enum PopupSection: String, CaseIterable {
     case usageHistory
-    case connectivityHistory
     case traffic
     case interfaceInfo
     case address
@@ -24,7 +23,6 @@ enum PopupSection: String, CaseIterable {
     var title: String {
         switch self {
         case .usageHistory: return "负载历史"
-        case .connectivityHistory: return "连接历史"
         case .traffic: return "流量统计"
         case .interfaceInfo: return "接口信息"
         case .address: return "地址"
@@ -86,6 +84,7 @@ enum Settings {
         static let totalDownload = "Network_totalDownload"
         static let usageResetNext = "Network_usageReset_next"
         static let usageResetTS = "Network_usageReset_ts"
+        static let savePowerWhenPopupClosed = "Network_savePowerWhenPopupClosed"
     }
 
     static func registerDefaults() {
@@ -123,7 +122,8 @@ enum Settings {
             Keys.totalUpload: 0,
             Keys.totalDownload: 0,
             Keys.usageResetNext: 0,
-            Keys.usageResetTS: 0
+            Keys.usageResetTS: 0,
+            Keys.savePowerWhenPopupClosed: true
         ]
         PopupSection.allCases.forEach { defaults[$0.key] = true }
         UserDefaults.standard.register(defaults: defaults)
@@ -172,6 +172,18 @@ enum Settings {
 
     static var interfaceDetails: Bool {
         return UserDefaults.standard.bool(forKey: Keys.interfaceDetails)
+    }
+
+    static var savePowerWhenPopupClosed: Bool {
+        return UserDefaults.standard.bool(forKey: Keys.savePowerWhenPopupClosed)
+    }
+
+    static var processPopupEnabled: Bool {
+        return self.popupSectionEnabled(.processes) && self.processCount > 0
+    }
+
+    static var connectivityPopupEnabled: Bool {
+        return self.popupSectionEnabled(.traffic)
     }
 
     // MARK: - data source
@@ -325,6 +337,7 @@ enum Settings {
     static func reset() {
         let defaults = UserDefaults.standard
         [
+            Keys.savePowerWhenPopupClosed,
             Keys.updateInterval, Keys.processCount, Keys.connectivityMode, Keys.icmpHost, Keys.httpHost,
             Keys.publicIP, Keys.interfaceDetails, Keys.readerType, Keys.interfaceName, Keys.base,
             Keys.speedUnit, Keys.usageReset, Keys.publicIPRefresh, Keys.vpnMode, Keys.connectivityInterval,

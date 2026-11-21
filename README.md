@@ -20,7 +20,7 @@
 ## Features
 
 - Live download/upload speed in the menu bar (two-row or one-row, dots/arrows/no icon, units toggle, monochrome, idle threshold)
-- Stats-style popup: usage history chart, connectivity history grid, traffic totals, interface & Wi-Fi details, addresses, top processes — every section can be enabled/disabled
+- Stats-style popup: usage history chart, traffic totals, interface & Wi-Fi details, addresses, top processes — every section can be enabled/disabled
 - Bandwidth from interface counters (`sysctl NET_RT_IFLIST2`) or per-process totals (`nettop`)
 - Connectivity probe: ICMP first, HTTP fallback; latency and jitter
 - Public IP lookup (`ip.mac-stats.com`) with optional auto-refresh
@@ -43,7 +43,7 @@
 
 ## Install
 
-1. Download `NetDog-0.2.3.zip` from [Releases](https://github.com/hellolib/netdog/releases).
+1. Download `NetDog-0.2.4.zip` from [Releases](https://github.com/hellolib/netdog/releases).
 2. Unzip and drag `NetDog.app` into `/Applications`.
 3. The app is ad-hoc signed. If macOS blocks the first launch, right-click the app → **Open**.
 
