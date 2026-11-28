@@ -157,6 +157,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.popupWindow.toggle(at: button)
         self.popupVisible = self.popupWindow.isVisible
         self.updateBackgroundSampling()
+        if willShow {
+            self.refreshPublicIP()
+        }
     }
 
     private func openActivityMonitor() {
